@@ -1,22 +1,22 @@
 # V1 verification report
 
-Release: **1.0.0**
-
+Release: **1.0.1**
 Verification date: **2026-07-13**
 
 ## Automated checks
 
 - `ruff format --check .`
 - `ruff check .`
-- importer ZIP build through `scripts/build_release.py`
-- 28 unit, controller, storage, and package tests
+- deterministic importer ZIP build through `scripts/build_release.py`
+- 32 unit, controller, adapter, storage, and package tests
 - offscreen PyQt5 docker import/construction smoke test
 - recursive Python bytecode compilation
 - Bash syntax validation
 - mocked Flatpak installation and replacement-backup test
 - ZIP CRC/integrity test
 - SHA-256 generation
-- local Git object and whitespace verification
+- reproducible-build digest comparison
+- local Git whitespace verification
 
 ## Behaviors covered
 
@@ -35,17 +35,25 @@ Verification date: **2026-07-13**
 - plugin registration and docker construction
 - switching between distinct documents that happen to share a root-node UUID
 - preserving unsaved docker edits when Krita returns another wrapper for the same document
+- direct `Document.nodeByUniqueID()` resolution without a layer-tree walk
+- compatibility tree-walk fallback when Qt UUID conversion is unavailable
+- per-window canvas document binding
+- in-memory rule-order rollback after a failed save
+- Linux Mint publishing through `python3`
 
-## Public Krita API surface checked
+## Official Krita surfaces checked
 
-The implementation is limited to public libkis/PyKrita operations used by V1:
+The implementation is limited to public libkis/PyKrita operations present in Krita 6.0.2.1:
 
 - `Krita.activeDocument()` and `Krita.activeWindow()`
 - `Window.activeView()`
+- `Canvas.view()` and `View.document()`
 - `View.selectedNodes()`
-- `Document.rootNode()`, `activeNode()`, annotations, `setModified()`, and `refreshProjection()`
+- `Document.rootNode()`, `nodeByUniqueID()`, `activeNode()`, annotations, `setModified()`, and `refreshProjection()`
 - `Node.childNodes()`, `name()`, `uniqueId()`, `visible()`, and `setVisible()`
 - docker registration through `DockWidgetFactory`
+
+The importer package was checked against Krita's own Python plugin importer strategy: a `.desktop` descriptor, a matching module directory, and an `__init__.py` file.
 
 ## Remaining real-world test
 

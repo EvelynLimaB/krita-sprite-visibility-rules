@@ -41,6 +41,7 @@ class SpriteVisibilityRulesDocker(DockWidget):
         self.setWindowTitle("Sprite Visibility Rules")
         self.app = Krita.instance()
         self.controller = VisibilityController(QByteArray)
+        self._canvas = None
 
         root = QWidget(self)
         layout = QVBoxLayout(root)
@@ -119,10 +120,23 @@ class SpriteVisibilityRulesDocker(DockWidget):
         self.timer.start()
         self._switch_document()
 
-    def canvasChanged(self, _canvas):
+    def canvasChanged(self, canvas):
+        # A docker exists per Krita main window. Keeping the canvas reference
+        # prevents inactive-window dockers from all polling the application's
+        # globally active document.
+        self._canvas = canvas
         self._switch_document()
 
     def _current_document(self):
+        if self._canvas is not None:
+            try:
+                view = self._canvas.view()
+                if view is not None:
+                    return view.document()
+            except Exception:
+                # Canvas/view wrappers may become invalid while a document is
+                # closing. The global API is the documented fallback.
+                pass
         return self.app.activeDocument()
 
     def _switch_document(self) -> None:
@@ -295,6 +309,12 @@ class SpriteVisibilityRulesDocker(DockWidget):
         )
         if self._save_and_refresh():
             self.rule_tree.setCurrentItem(self.rule_tree.topLevelItem(target))
+        else:
+            self.controller.rules[index], self.controller.rules[target] = (
+                self.controller.rules[target],
+                self.controller.rules[index],
+            )
+            self.refresh_tree()
 
     def enforce_now(self) -> None:
         self._show_report(self.controller.enforce_now())

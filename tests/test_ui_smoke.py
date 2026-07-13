@@ -76,6 +76,61 @@ class UiSmokeTests(unittest.TestCase):
             self.assertTrue(docker.controller.paused)
             docker.interval_spin.setValue(200)
             self.assertEqual(docker.timer.interval(), 200)
+
+            class FakeRoot:
+                def childNodes(self):
+                    return []
+
+            class FakeDocument:
+                def annotationTypes(self):
+                    return []
+
+                def rootNode(self):
+                    return FakeRoot()
+
+                def activeNode(self):
+                    return None
+
+                def name(self):
+                    return "Canvas document"
+
+                def fileName(self):
+                    return ""
+
+            class FakeView:
+                def __init__(self, document):
+                    self._document = document
+
+                def document(self):
+                    return self._document
+
+            class FakeCanvas:
+                def __init__(self, document):
+                    self._view = FakeView(document)
+
+                def view(self):
+                    return self._view
+
+            canvas_document = FakeDocument()
+            docker.canvasChanged(FakeCanvas(canvas_document))
+            self.assertIs(docker.controller.document, canvas_document)
+
+            from sprite_visibility_rules.models import NodeRef, RuleKind, VisibilityRule
+
+            docker.controller.rules = [
+                VisibilityRule("first", RuleKind.LINKED, [NodeRef("a", "A"), NodeRef("b", "B")]),
+                VisibilityRule("second", RuleKind.LINKED, [NodeRef("c", "C"), NodeRef("d", "D")]),
+            ]
+            docker.refresh_tree()
+            docker.rule_tree.setCurrentItem(docker.rule_tree.topLevelItem(0))
+            original_order = [rule.name for rule in docker.controller.rules]
+            original_save = docker._save_and_refresh
+            docker._save_and_refresh = lambda *args, **kwargs: False
+            try:
+                docker.move_rule(1)
+            finally:
+                docker._save_and_refresh = original_save
+            self.assertEqual([rule.name for rule in docker.controller.rules], original_order)
         finally:
             docker.timer.stop()
             docker.close()

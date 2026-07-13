@@ -6,7 +6,7 @@ PyQt5. PyQt6 is supported as a fallback for builds that migrate the bindings.
 """
 
 try:
-    from PyQt5.QtCore import QByteArray, Qt, QTimer
+    from PyQt5.QtCore import QByteArray, Qt, QTimer, QUuid
     from PyQt5.QtWidgets import (
         QAbstractItemView,
         QCheckBox,
@@ -36,7 +36,7 @@ try:
     CANCEL = QDialogButtonBox.Cancel
     YES = QMessageBox.Yes
 except ImportError:  # Future/alternate Krita builds may expose PyQt6.
-    from PyQt6.QtCore import QByteArray, Qt, QTimer
+    from PyQt6.QtCore import QByteArray, Qt, QTimer, QUuid
     from PyQt6.QtWidgets import (
         QAbstractItemView,
         QCheckBox,
@@ -94,6 +94,7 @@ __all__ = [
     "QPushButton",
     "QSpinBox",
     "QTimer",
+    "QUuid",
     "QTreeWidget",
     "QTreeWidgetItem",
     "QVBoxLayout",

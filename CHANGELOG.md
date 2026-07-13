@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.1 — 2026-07-13
+
+- Audited the plugin against Krita 6.0.2.1's public PyKrita API and importer.
+- Added direct UUID lookup with a compatibility fallback to layer-tree traversal.
+- Scoped each docker to its own canvas document.
+- Fixed failed rule-order saves not rolling back in memory.
+- Fixed the GitHub helper to use `python3` and derive all release names from the version.
+- Expanded adapter, UI, package, and Flatpak tests.
+
 ## 1.0.0 — 2026-07-13
 
 - Initial proof-checked release.

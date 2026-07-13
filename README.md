@@ -13,11 +13,11 @@ A Krita docker for game-art and sprite files where layer visibility needs to beh
 - Missing-layer warnings and **Rebind** support after a layer is deleted/recreated.
 - Rule ordering, per-rule enable/disable, global pause, and configurable polling interval.
 - Cycle detection: contradictory overlapping rules are reported instead of flickering forever.
-- PyQt5/PyQt6 import compatibility and a Flatpak installation helper.
+- PyQt5 support for the current Krita Flatpak, a conservative PyQt6 fallback, and a Flatpak installation helper.
 
 ## Install in Krita
 
-Download `sprite_visibility_rules-1.0.0.zip` from the release assets, then:
+Download `sprite_visibility_rules-1.0.1.zip` from the release assets, then:
 
 1. Open **Tools → Scripts → Import Python Plugin…**.
 2. Select the ZIP and restart Krita.
@@ -70,7 +70,7 @@ The changed member becomes the driver and every other existing member receives t
 
 ## Limits of V1
 
-Krita's public Python API exposes `Node.visible()` and `Node.setVisible()` but no layer-visibility-changed signal. V1 therefore checks only linked layers on a short timer (125 ms by default). It does not inspect pixels or redraw the canvas itself.
+Krita's public Python API exposes `Node.visible()` and `Node.setVisible()` but no layer-visibility-changed signal. V1 therefore checks only linked layers on a short timer (125 ms by default). On Krita 6 it resolves tracked layers through `Document.nodeByUniqueID()` and falls back to tree traversal on older or unusual bindings. It does not inspect pixels or redraw the canvas itself.
 
 An operation that changes several linked members in the same polling window is resolved deterministically: Krita's active layer wins when possible, then rule/member order. Overlapping rules are legal, but contradictory overlaps may be rejected as a cycle.
 
@@ -91,7 +91,7 @@ The repository contains pure-Python tests for:
 Run the complete local verification suite:
 
 ```bash
-python scripts/verify_release.py
+python3 scripts/verify_release.py
 ```
 
 The GitHub Actions workflow runs linting, package tests, Flatpak installer tests, and the offscreen Qt docker smoke test. See `TEST_REPORT.md` for the V1 verification record.
@@ -108,7 +108,7 @@ GPL-3.0-or-later.
 
 ## Publishing the prepared repository
 
-After installing and authenticating GitHub CLI, the included helper creates the repository under `EvelynLimaB`, pushes `main` and tag `v1.0.0`, and uploads the plugin ZIP and checksum as a GitHub release:
+After installing and authenticating GitHub CLI, the included helper creates the repository under `EvelynLimaB`, pushes `main` and the version-derived release tag, and uploads the plugin ZIP and checksum as a GitHub release:
 
 ```bash
 gh auth login

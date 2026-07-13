@@ -1,6 +1,6 @@
 [project]
 name = "krita-sprite-visibility-rules"
-version = "1.0.0"
+version = "1.0.1"
 description = "Krita docker for exclusive, linked, and inverse layer visibility rules"
 requires-python = ">=3.10"
 license = { text = "GPL-3.0-or-later" }

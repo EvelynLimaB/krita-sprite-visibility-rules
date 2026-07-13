@@ -17,6 +17,6 @@
 <li>Save the <code>.kra</code> document. Rules are embedded in that document.</li>
 </ol>
 <h2>Important behavior</h2>
-<p>The plugin checks participating layer visibility at a configurable interval. Normal eye-icon clicks, shortcuts, compositions, and other scripts are detected. If rules conflict and form a cycle, the plugin refuses to flicker the layers and reports a warning.</p>
+<p>The plugin checks participating layer visibility at a configurable interval. On Krita 6 it resolves linked layers by their public UUID lookup API and uses a compatibility tree-walk fallback when necessary. Normal eye-icon clicks, shortcuts, compositions, and other scripts are detected. If rules conflict and form a cycle, the plugin refuses to flicker the layers and reports a warning.</p>
 <p>Deleting and recreating a layer gives it a new internal ID. Select the replacement layers and use <b>Rebind</b>.</p>
 </body></html>

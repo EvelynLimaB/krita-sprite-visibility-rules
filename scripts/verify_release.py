@@ -11,6 +11,8 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+from sprite_visibility_rules.version import __version__  # noqa: E402
 
 
 def run(*args: str, env: dict[str, str] | None = None) -> None:
@@ -26,7 +28,7 @@ def main() -> int:
         print("- ruff not installed; style checks skipped", file=sys.stderr)
 
     run(sys.executable, "scripts/build_release.py")
-    archive = ROOT / "dist" / "sprite_visibility_rules-1.0.0.zip"
+    archive = ROOT / "dist" / "sprite_visibility_rules-{}.zip".format(__version__)
     first_digest = subprocess.check_output(["sha256sum", str(archive)], text=True).split()[0]
     run(sys.executable, "scripts/build_release.py")
     second_digest = subprocess.check_output(["sha256sum", str(archive)], text=True).split()[0]
@@ -67,7 +69,7 @@ def main() -> int:
 
     digest = subprocess.check_output(["sha256sum", str(archive)], text=True).split()[0]
     (ROOT / "dist" / "SHA256SUMS").write_text(
-        f"{digest}  sprite_visibility_rules-1.0.0.zip\n", encoding="utf-8"
+        f"{digest}  sprite_visibility_rules-{__version__}.zip\n", encoding="utf-8"
     )
     print("Verification passed")
     return 0
