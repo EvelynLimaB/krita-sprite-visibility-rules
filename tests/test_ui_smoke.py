@@ -9,6 +9,7 @@ from unittest.mock import Mock
 class UiSmokeTests(unittest.TestCase):
     def test_plugin_registers_and_docker_constructs_with_public_surface(self):
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        from PyQt5.QtTest import QTest
         from PyQt5.QtWidgets import QApplication, QDockWidget
 
         app_qt = QApplication.instance() or QApplication([])
@@ -73,7 +74,9 @@ class UiSmokeTests(unittest.TestCase):
             self.assertEqual(docker.windowTitle(), "Sprite Visibility Rules")
             self.assertTrue(docker.timer.isActive())
             self.assertEqual(docker.controller.rules, [])
-            self.assertEqual(docker.interval_spin.minimum(), 25)
+            self.assertEqual(docker.interval_spin.minimum(), 50)
+            self.assertTrue(docker._input_settle_timer.isSingleShot())
+            self.assertEqual(docker._input_settle_timer.interval(), 32)
             docker.pause_checkbox.setChecked(True)
             self.assertTrue(docker.controller.paused)
             docker.interval_spin.setValue(200)
@@ -98,6 +101,9 @@ class UiSmokeTests(unittest.TestCase):
 
                 def fileName(self):
                     return ""
+
+                def refreshProjection(self):
+                    pass
 
             class FakeView:
                 def __init__(self, document):
@@ -148,12 +154,17 @@ class UiSmokeTests(unittest.TestCase):
             try:
                 docker.request_scan()
                 docker.request_scan()
+                self.assertTrue(docker._input_settle_timer.isActive())
+                app_qt.processEvents()
+                docker._scan_once.assert_not_called()
+                QTest.qWait(45)
                 app_qt.processEvents()
                 docker._scan_once.assert_called_once_with(check_document=False)
             finally:
                 docker._scan_once = original_scan_once
         finally:
             docker.timer.stop()
+            docker._input_settle_timer.stop()
             docker.close()
             app_qt.processEvents()
 
