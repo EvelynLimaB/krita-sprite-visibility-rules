@@ -14,24 +14,33 @@ A normal visibility correction could perform all of the following:
 
 The 125 ms timer also meant an ordinary eye-icon click could wait almost a full polling interval before enforcement.
 
-## V1.1.0 changes
+## V1.1.0 optimization
 
-- Public Qt mouse-release and shortcut events schedule one coalesced scan with `QTimer.singleShot(0, ...)`.
-- The timer remains as a fallback for programmatic and unusual visibility changes.
-- UUID-resolved node wrappers are reused for 500 ms and invalidated on rule/document changes or wrapper errors.
-- Rule membership is compiled into `member ID -> affected rules` indexes.
-- Cascade passes process only rules touched by the current trigger set.
-- Changed layers are read back directly; the tracked set is not fully resolved and reread again.
-- The plugin does not call `Document.refreshProjection()` after `Node.setVisible()`.
-- The docker tree is rebuilt only when document/rule/missing-layer status changes, not after each successful toggle.
+- Public Qt mouse-release and shortcut events scheduled a coalesced scan at the next event-loop opportunity.
+- The timer remained as a fallback for programmatic and unusual visibility changes.
+- UUID-resolved node wrappers were reused for 500 ms and invalidated on rule/document changes or wrapper errors.
+- Rule membership was compiled into `member ID -> affected rules` indexes.
+- Cascade passes processed only rules touched by the current trigger set.
+- Changed layers were read back directly; the tracked set was not fully resolved and reread again.
+- The docker tree was rebuilt only when document/rule/missing-layer status changed.
+
+The zero-delay enforcement and removal of explicit projection refreshes proved too aggressive for some Krita rendering paths.
+
+## V1.1.1 render-safe hot path
+
+- Layer-list and shortcut input is debounced for 32 ms, allowing Krita's own visibility transaction and asynchronous projection scheduling to settle.
+- Rapid clicks restart the single-shot timer and are coalesced into one dependent visibility batch.
+- One `Document.refreshProjection()` runs after the complete plugin-generated batch, not after every individual layer.
+- Node caching, compiled dispatch, affected-rule-only cascades, direct changed-layer readback, and reduced docker rebuilding remain enabled.
+- The minimum fallback polling interval is 50 ms.
 
 ## Synthetic rule-engine benchmark
 
-The included benchmark measures pure Python rule dispatch with six members per linked rule. It does not measure Krita rendering, Qt event delivery, GPU work, or Flatpak overhead.
+The included benchmark measures pure Python rule dispatch with six members per linked rule. It does not measure Krita rendering, Qt event delivery, GPU work, Flatpak overhead, the 32 ms render-settle delay, or projection rebuilding.
 
 Observed on the development environment, in median microseconds per visibility event:
 
-| Rules | V1.0.2-style dispatch | V1.1.0 compiled dispatch | Speedup |
+| Rules | V1.0.2-style dispatch | V1.1 compiled dispatch | Speedup |
 |---:|---:|---:|---:|
 | 10 | 19.47 µs | 10.48 µs | 1.86× |
 | 50 | 88.28 µs | 34.39 µs | 2.57× |
@@ -47,9 +56,9 @@ python3 scripts/benchmark_hot_path.py
 ## Recommended settings
 
 - **125 ms:** conservative default and good compatibility fallback.
-- **250–500 ms:** lower idle API traffic while ordinary layer-list clicks still wake immediately.
-- **25–50 ms:** useful for stress tests or programmatic workflows where every millisecond matters, at higher idle CPU cost.
+- **250–500 ms:** lower idle API traffic while ordinary layer-list clicks use the separate 32 ms render-safe path.
+- **50–100 ms:** useful for programmatic visibility workflows, at higher idle API cost.
 
 ## Remaining bottleneck
 
-For realistic sprite files, Krita/Qt API calls and canvas invalidation are expected to dominate the sub-millisecond pure rule engine. The most useful real-world measurement is therefore perceived click-to-correction latency and idle CPU use in the production `.kra`, not only the synthetic benchmark.
+For realistic sprite files, Krita/Qt API calls, projection rebuilding, and canvas invalidation dominate the sub-millisecond pure rule engine. The most useful real-world measurements are perceived click-to-correction latency, visual correctness after rapid switching, and idle CPU use in the production `.kra`.
