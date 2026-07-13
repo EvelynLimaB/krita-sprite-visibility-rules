@@ -8,16 +8,17 @@ A Krita docker for game-art and sprite files where layer visibility needs to beh
 - **Exclusive set:** showing one expression/outfit layer hides every other member.
 - **Linked set:** hiding or showing one layer applies the same state to every member.
 - Detects changes made through Krita's normal eye icons, shortcuts, compositions, or other plugins.
+- Wakes immediately after layer-list mouse input and shortcut events while retaining polling as a compatibility fallback.
 - Embeds rules in the `.kra` document using Krita document annotations.
 - Uses Krita node UUIDs, so renaming or moving a linked layer does not break the rule.
 - Missing-layer warnings and **Rebind** support after a layer is deleted/recreated.
-- Rule ordering, per-rule enable/disable, global pause, and configurable polling interval.
+- Rule ordering, per-rule enable/disable, global pause, and configurable fallback polling interval.
 - Cycle detection: contradictory overlapping rules are reported instead of flickering forever.
 - PyQt5 support for the current Krita Flatpak, a conservative PyQt6 fallback, and a Flatpak installation helper.
 
 ## Install in Krita
 
-Download the release asset named `sprite_visibility_rules-1.0.2.zip`, then:
+Download the release asset named `sprite_visibility_rules-1.1.0.zip`, then:
 
 1. Open **Tools → Scripts → Import Python Plugin…**.
 2. Select the ZIP and restart Krita.
@@ -26,8 +27,6 @@ Download the release asset named `sprite_visibility_rules-1.0.2.zip`, then:
 5. Open **Settings → Dockers → Sprite Visibility Rules**.
 
 Do **not** use GitHub's automatically generated **Source code (zip)** download. Use the specifically named plugin asset from the release.
-
-Version 1.0.1 had a packaging defect that caused Krita to report **“No plugins found in archive.”** Version 1.0.2 adds the explicit module-directory entry required by Krita's importer.
 
 ### Flatpak helper
 
@@ -53,6 +52,29 @@ It installs into:
 6. Click either normal eye icon. The other layer should immediately switch to the opposite state.
 7. Save the `.kra`, close it, reopen it, and verify the rule reloads.
 
+## Responsiveness
+
+Version 1.1 adds an event-assisted fast path. A mouse release in a Krita item view, such as the Layers or Compositions docker, or a shortcut event schedules one coalesced scan at the next Qt event-loop opportunity. The regular timer remains active for visibility changes made programmatically by other plugins and for unusual UI paths.
+
+The fallback interval defaults to 125 ms. Since normal Layers-docker clicks wake immediately, increasing it to 250–500 ms can reduce idle API traffic without making ordinary eye-icon clicks feel slower. A 25–50 ms fallback is available for stress testing, but it performs more frequent visibility reads.
+
+The hot path also:
+
+- caches resolved Krita node wrappers for a short period;
+- compiles rule membership and dispatch indexes only when rules change;
+- evaluates only rules touched by the changed layers;
+- avoids a second complete node-resolution pass after enforcement;
+- avoids rebuilding the docker after every successful visibility correction;
+- relies on Krita's own visibility invalidation instead of forcing an additional projection refresh.
+
+Run the synthetic rule-dispatch benchmark:
+
+```bash
+python3 scripts/benchmark_hot_path.py
+```
+
+The benchmark isolates pure rule dispatch. It is not a canvas-rendering or GPU benchmark.
+
 ## Rule semantics
 
 ### Inverse pair
@@ -74,9 +96,11 @@ The changed member becomes the driver and every other existing member receives t
 
 ## Limits
 
-Krita's public Python API exposes `Node.visible()` and `Node.setVisible()` but no layer-visibility-changed signal. The plugin therefore checks only linked layers on a short timer (125 ms by default). On Krita 6 it resolves tracked layers through `Document.nodeByUniqueID()` and falls back to tree traversal on older or unusual bindings.
+Krita's public Python API exposes `Node.visible()` and `Node.setVisible()` but no layer-visibility-changed signal. Event-assisted scanning therefore supplements rather than replaces polling.
 
-An operation that changes several linked members in the same polling window is resolved deterministically: Krita's active layer wins when possible, then rule/member order. Overlapping rules are legal, but contradictory overlaps may be rejected as a cycle.
+Tracked node wrappers are refreshed approximately twice per second and immediately after rule/document changes. A newly deleted layer can consequently take up to about half a second to be reported as missing, while visibility changes continue to use the fast cached path.
+
+An operation that changes several linked members in the same scan window is resolved deterministically: Krita's active layer wins when possible, then rule/member order. Overlapping rules are legal, but contradictory overlaps may be rejected as a cycle.
 
 ## Verification
 

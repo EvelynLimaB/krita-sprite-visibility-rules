@@ -2,6 +2,7 @@ import os
 import sys
 import types
 import unittest
+from unittest.mock import Mock
 
 
 @unittest.skipUnless(os.environ.get("RUN_QT_SMOKE") == "1", "Qt smoke test is opt-in")
@@ -72,6 +73,7 @@ class UiSmokeTests(unittest.TestCase):
             self.assertEqual(docker.windowTitle(), "Sprite Visibility Rules")
             self.assertTrue(docker.timer.isActive())
             self.assertEqual(docker.controller.rules, [])
+            self.assertEqual(docker.interval_spin.minimum(), 25)
             docker.pause_checkbox.setChecked(True)
             self.assertTrue(docker.controller.paused)
             docker.interval_spin.setValue(200)
@@ -118,8 +120,16 @@ class UiSmokeTests(unittest.TestCase):
             from sprite_visibility_rules.models import NodeRef, RuleKind, VisibilityRule
 
             docker.controller.rules = [
-                VisibilityRule("first", RuleKind.LINKED, [NodeRef("a", "A"), NodeRef("b", "B")]),
-                VisibilityRule("second", RuleKind.LINKED, [NodeRef("c", "C"), NodeRef("d", "D")]),
+                VisibilityRule(
+                    "first",
+                    RuleKind.LINKED,
+                    [NodeRef("a", "A"), NodeRef("b", "B")],
+                ),
+                VisibilityRule(
+                    "second",
+                    RuleKind.LINKED,
+                    [NodeRef("c", "C"), NodeRef("d", "D")],
+                ),
             ]
             docker.refresh_tree()
             docker.rule_tree.setCurrentItem(docker.rule_tree.topLevelItem(0))
@@ -131,6 +141,17 @@ class UiSmokeTests(unittest.TestCase):
             finally:
                 docker._save_and_refresh = original_save
             self.assertEqual([rule.name for rule in docker.controller.rules], original_order)
+
+            docker.controller.paused = True
+            original_scan_once = docker._scan_once
+            docker._scan_once = Mock()
+            try:
+                docker.request_scan()
+                docker.request_scan()
+                app_qt.processEvents()
+                docker._scan_once.assert_called_once_with(check_document=False)
+            finally:
+                docker._scan_once = original_scan_once
         finally:
             docker.timer.stop()
             docker.close()

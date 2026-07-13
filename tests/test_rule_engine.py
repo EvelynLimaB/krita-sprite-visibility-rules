@@ -79,6 +79,25 @@ class RuleEngineTests(unittest.TestCase):
         result = normalize_rules({"a": True, "b": True}, [rule], active_id="a")
         self.assertEqual(result.states, {"a": True, "b": False})
 
+    def test_unrelated_rules_do_not_change_triggered_result(self):
+        rules = [
+            VisibilityRule("target", RuleKind.INVERSE, refs("a", "b")),
+            *[
+                VisibilityRule(
+                    "unrelated-{}".format(index),
+                    RuleKind.LINKED,
+                    refs("u{}a".format(index), "u{}b".format(index)),
+                )
+                for index in range(100)
+            ],
+        ]
+        states = {"a": False, "b": False}
+        for index in range(100):
+            states["u{}a".format(index)] = True
+            states["u{}b".format(index)] = True
+        result = enforce_rules(states, ["a"], rules, active_id="a")
+        self.assertEqual(result.changes, {"b": True})
+
 
 if __name__ == "__main__":
     unittest.main()

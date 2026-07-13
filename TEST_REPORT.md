@@ -1,48 +1,40 @@
 # Verification report
 
-Release: **1.0.2**  
+Release: **1.1.0**  
 Verification date: **2026-07-13**
 
 ## Automated checks
 
-- `ruff format --check .`
-- `ruff check .`
-- deterministic importer ZIP build through `scripts/build_release.py`
-- unit, controller, adapter, storage, package, and importer-layout tests
-- offscreen PyQt5 docker import/construction smoke test
+- Ruff format and lint checks in the tests workflow
+- deterministic Krita importer ZIP build
+- unit, controller, adapter, storage, package, and rule-engine tests
+- offscreen PyQt5 docker construction test
+- event-assisted scan coalescing test
 - recursive Python bytecode compilation
 - Bash syntax validation
 - mocked Flatpak installation and replacement-backup test
-- ZIP CRC/integrity test
-- SHA-256 generation
-- reproducible-build digest comparison
-- local Git whitespace verification
+- ZIP CRC/integrity and reproducibility checks
 
-## Behaviors covered
+## Responsiveness regressions covered
 
-- inverse pair in both directions
-- normal eye-click simulation through the polling controller
-- linked visibility propagation
-- exclusive visibility, including strict fallback behavior
-- missing layer handling
-- cascaded rules
-- contradictory cycle rejection
-- disabled rules
-- annotation JSON round trip
-- malformed and unsupported annotation data
-- rule validation
-- plugin registration and docker construction
-- direct `Document.nodeByUniqueID()` resolution and compatibility fallback
-- per-window canvas document binding
-- in-memory rule-order rollback after a failed save
-- Linux Mint publishing through `python3`
-- explicit ZIP module-directory entry required by Krita's importer
-- module discovery matching Krita's directory plus `__init__.py` algorithm
+- node wrappers are reused across hot scans;
+- a successful rule correction does not force `Document.refreshProjection()`;
+- the controller does not perform a second full UUID-resolution pass after enforcement;
+- unrelated rules do not affect a triggered result;
+- multiple immediate wake requests coalesce into one queued scan;
+- the regular timer remains active as a fallback;
+- the docker does not rebuild its rule tree for ordinary successful corrections.
 
-## Packaging regression fixed
+## Synthetic benchmark
 
-Version 1.0.1 contained the correct files but omitted the explicit `sprite_visibility_rules/` directory member. Krita's importer therefore returned “No plugins found in archive.” Version 1.0.2 writes this directory entry and tests it directly.
+Run:
+
+```bash
+python3 scripts/benchmark_hot_path.py
+```
+
+This benchmark measures the pure rule-dispatch hot path. It does not measure Krita rendering, Qt event delivery, GPU work, or Flatpak overhead. Real responsiveness should also be checked interactively with the user's production-size `.kra` files.
 
 ## Remaining real-world test
 
-The final proof is an interactive import and runtime test in the user's exact Krita Flatpak, desktop session, and plugin combination.
+The final performance proof is an interactive comparison inside the user's graphical Krita Flatpak. Compare 1.0.2 and 1.1.0 with the same file, rule set, fallback interval, and rapid eye-icon sequence while observing CPU use and perceived latency.

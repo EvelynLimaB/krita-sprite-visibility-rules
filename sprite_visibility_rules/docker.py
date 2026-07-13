@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import List, Optional, Set
 
 from krita import DockWidget, Krita
 
@@ -13,15 +13,22 @@ from .krita_adapter import node_ref, selected_nodes
 from .models import NodeRef
 from .qt_compat import (
     ACCEPTED,
+    COARSE_TIMER,
+    MOUSE_BUTTON_RELEASE,
+    PRECISE_TIMER,
     SELECT_ROWS,
+    SHORTCUT_EVENT,
     SINGLE_SELECTION,
     USER_ROLE,
     YES,
+    QAbstractItemView,
+    QApplication,
     QByteArray,
     QCheckBox,
     QHBoxLayout,
     QLabel,
     QMessageBox,
+    QObject,
     QPushButton,
     QSpinBox,
     QTimer,
@@ -35,6 +42,27 @@ from .storage import StorageError
 from .version import __version__
 
 
+class _InputWakeFilter(QObject):
+    """Wake the scanner after visibility-related UI input.
+
+    The filter relies only on public Qt event and widget base classes. It does
+    not inspect Krita's private Layers-docker object names or delegates.
+    """
+
+    def __init__(self, docker):
+        super().__init__(docker)
+        self._docker = docker
+
+    def eventFilter(self, watched, event):
+        try:
+            if self._docker._input_should_wake(watched, event):
+                self._docker.request_scan()
+        except Exception:
+            # An event filter must never interfere with Krita's own event path.
+            pass
+        return False
+
+
 class SpriteVisibilityRulesDocker(DockWidget):
     def __init__(self):
         super().__init__()
@@ -42,6 +70,9 @@ class SpriteVisibilityRulesDocker(DockWidget):
         self.app = Krita.instance()
         self.controller = VisibilityController(QByteArray)
         self._canvas = None
+        self._scan_pending = False
+        self._scan_running = False
+        self._last_missing_ids: Set[str] = set()
 
         root = QWidget(self)
         layout = QVBoxLayout(root)
@@ -86,18 +117,20 @@ class SpriteVisibilityRulesDocker(DockWidget):
         settings_row = QHBoxLayout()
         self.pause_checkbox = QCheckBox("Pause automatic rules", root)
         self.interval_spin = QSpinBox(root)
-        self.interval_spin.setRange(50, 1000)
+        self.interval_spin.setRange(25, 1000)
         self.interval_spin.setSingleStep(25)
         stored_interval = int(
             self.app.readSetting("sprite_visibility_rules", "poll_interval_ms", "125")
         )
-        self.interval_spin.setValue(max(50, min(1000, stored_interval)))
+        self.interval_spin.setValue(max(25, min(1000, stored_interval)))
         settings_row.addWidget(self.pause_checkbox)
-        settings_row.addWidget(QLabel("Poll ms:", root))
+        settings_row.addWidget(QLabel("Fallback poll ms:", root))
         settings_row.addWidget(self.interval_spin)
         layout.addLayout(settings_row)
 
-        self.status_label = QLabel("Ready — plugin v{}".format(__version__), root)
+        self.status_label = QLabel(
+            "Ready — plugin v{}; layer-list input wakes immediately.".format(__version__), root
+        )
         self.status_label.setWordWrap(True)
         layout.addWidget(self.status_label)
 
@@ -115,15 +148,18 @@ class SpriteVisibilityRulesDocker(DockWidget):
         self.interval_spin.valueChanged.connect(self._set_interval)
 
         self.timer = QTimer(self)
-        self.timer.setInterval(self.interval_spin.value())
         self.timer.timeout.connect(self._tick)
+        self._set_interval(self.interval_spin.value())
         self.timer.start()
+
+        self._input_filter = _InputWakeFilter(self)
+        qt_application = QApplication.instance()
+        if qt_application is not None:
+            qt_application.installEventFilter(self._input_filter)
+
         self._switch_document()
 
     def canvasChanged(self, canvas):
-        # A docker exists per Krita main window. Keeping the canvas reference
-        # prevents inactive-window dockers from all polling the application's
-        # globally active document.
         self._canvas = canvas
         self._switch_document()
 
@@ -134,38 +170,99 @@ class SpriteVisibilityRulesDocker(DockWidget):
                 if view is not None:
                     return view.document()
             except Exception:
-                # Canvas/view wrappers may become invalid while a document is
-                # closing. The global API is the documented fallback.
                 pass
         return self.app.activeDocument()
 
     def _switch_document(self) -> None:
         document = self._current_document()
         changed = self.controller.set_document(document)
+        if not changed:
+            return
+
         if document is None:
             self.document_label.setText("No document")
         else:
             name = str(document.name() or document.fileName() or "Untitled")
             self.document_label.setText("Document: {}".format(name))
-        if changed:
-            self.refresh_tree()
-            if self.controller.last_error:
-                self._set_status(self.controller.last_error, error=True)
-            elif self.controller.load_warnings:
-                self._set_status(" ".join(self.controller.load_warnings), warning=True)
-            else:
-                self._set_status(
-                    "Loaded {} rule{} from this document.".format(
-                        len(self.controller.rules), "" if len(self.controller.rules) == 1 else "s"
-                    )
+        self._last_missing_ids = set(self.controller.last_missing_ids)
+        self.refresh_tree(missing=self._last_missing_ids)
+        if self.controller.last_error:
+            self._set_status(self.controller.last_error, error=True)
+        elif self.controller.load_warnings:
+            self._set_status(" ".join(self.controller.load_warnings), warning=True)
+        else:
+            self._set_status(
+                "Loaded {} rule{} from this document.".format(
+                    len(self.controller.rules), "" if len(self.controller.rules) == 1 else "s"
                 )
+            )
+
+    def _is_same_window(self, watched) -> bool:
+        try:
+            watched_window = watched.window()
+            docker_window = self.window()
+        except Exception:
+            return True
+        return watched_window == docker_window
+
+    @staticmethod
+    def _is_item_view_or_child(watched) -> bool:
+        current = watched
+        for _depth in range(10):
+            if isinstance(current, QAbstractItemView):
+                return True
+            parent_widget = getattr(current, "parentWidget", None)
+            if parent_widget is None:
+                return False
+            current = parent_widget()
+            if current is None:
+                return False
+        return False
+
+    def _input_should_wake(self, watched, event) -> bool:
+        if self.controller.paused or not self.controller.rules:
+            return False
+        event_type = event.type()
+        if event_type == SHORTCUT_EVENT:
+            return self._is_same_window(watched)
+        if event_type != MOUSE_BUTTON_RELEASE:
+            return False
+        return self._is_same_window(watched) and self._is_item_view_or_child(watched)
+
+    def request_scan(self) -> None:
+        if self._scan_pending:
+            return
+        self._scan_pending = True
+        QTimer.singleShot(0, self._run_pending_scan)
+
+    def _run_pending_scan(self) -> None:
+        self._scan_pending = False
+        self._scan_once(check_document=False)
 
     def _tick(self) -> None:
-        self._switch_document()
-        report = self.controller.scan()
-        if report.message or report.warnings or report.missing_ids:
-            self._show_report(report)
-            self.refresh_tree()
+        if self._scan_pending:
+            return
+        self._scan_once(check_document=True)
+
+    def _scan_once(self, check_document: bool) -> None:
+        if self._scan_running:
+            self.request_scan()
+            return
+        self._scan_running = True
+        try:
+            if check_document:
+                self._switch_document()
+            report = self.controller.scan()
+            missing_changed = report.missing_ids != self._last_missing_ids
+            if report.message or report.warnings or report.missing_ids:
+                self._show_report(report)
+            elif missing_changed:
+                self._set_status("All linked layers are available.")
+            if missing_changed:
+                self._last_missing_ids = set(report.missing_ids)
+                self.refresh_tree(missing=self._last_missing_ids)
+        finally:
+            self._scan_running = False
 
     def _set_status(self, text: str, warning: bool = False, error: bool = False) -> None:
         prefix = "Error: " if error else "Warning: " if warning else ""
@@ -213,9 +310,11 @@ class SpriteVisibilityRulesDocker(DockWidget):
         except StorageError as exc:
             QMessageBox.critical(self, "Could not save rules", str(exc))
             return False
+        report = self.controller.enforce_now() if enforce else ScanReport()
         if enforce:
-            self._show_report(self.controller.enforce_now())
-        self.refresh_tree()
+            self._show_report(report)
+        self._last_missing_ids = set(self.controller.last_missing_ids)
+        self.refresh_tree(missing=self._last_missing_ids)
         return True
 
     def add_rule(self) -> None:
@@ -314,33 +413,34 @@ class SpriteVisibilityRulesDocker(DockWidget):
                 self.controller.rules[target],
                 self.controller.rules[index],
             )
-            self.refresh_tree()
+            self.refresh_tree(missing=self._last_missing_ids)
 
     def enforce_now(self) -> None:
-        self._show_report(self.controller.enforce_now())
-        self.refresh_tree()
+        report = self.controller.enforce_now()
+        self._show_report(report)
+        self._last_missing_ids = set(report.missing_ids)
+        self.refresh_tree(missing=self._last_missing_ids)
 
     def _set_paused(self, paused: bool) -> None:
         self.controller.paused = bool(paused)
         self._set_status("Automatic rules paused." if paused else "Automatic rules resumed.")
         if not paused:
-            self.controller.snapshot()
+            self.controller.snapshot(force_resolve=True)
 
     def _set_interval(self, value: int) -> None:
-        self.timer.setInterval(value)
+        if hasattr(self, "timer"):
+            self.timer.setTimerType(PRECISE_TIMER if value <= 125 else COARSE_TIMER)
+            self.timer.setInterval(value)
         self.app.writeSetting("sprite_visibility_rules", "poll_interval_ms", str(value))
 
-    def refresh_tree(self) -> None:
+    def refresh_tree(self, missing: Optional[Set[str]] = None) -> None:
         selected_index = self._selected_rule_index()
         self.rule_tree.clear()
-        missing = set()
-        if self.controller.document is not None:
-            nodes, _states = self.controller._nodes_and_states()
-            missing = self.controller.tracked_ids().difference(nodes.keys())
+        missing_ids = set(self.controller.last_missing_ids if missing is None else missing)
         conflicts = self.controller.conflicts()
 
         for index, rule in enumerate(self.controller.rules):
-            missing_count = sum(member.node_id in missing for member in rule.members)
+            missing_count = sum(member.node_id in missing_ids for member in rule.members)
             conflict_count = sum(member.node_id in conflicts for member in rule.members)
             statuses = []
             if not rule.enabled:

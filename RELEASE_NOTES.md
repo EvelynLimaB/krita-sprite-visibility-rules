@@ -1,26 +1,30 @@
-# Sprite Visibility Rules 1.0.2
+# Sprite Visibility Rules 1.1.0
 
-Packaging-fix release for Krita's built-in Python Plugin Importer.
+Responsiveness and hot-path optimization release.
 
-## Fixed
+## Faster interaction
 
-Krita 6 could open the 1.0.1 ZIP but reported **“No plugins found in archive.”** The files were at the correct paths, but the deterministic ZIP builder omitted the explicit `sprite_visibility_rules/` directory member. Krita's importer searches for that directory entry before checking `sprite_visibility_rules/__init__.py`.
+- Layers-docker and Compositions-docker mouse input now schedules an immediate coalesced scan at the next Qt event-loop opportunity.
+- Shortcut events also wake the scanner immediately.
+- The configurable timer remains as a fallback for visibility changes made by other plugins or unusual UI paths.
+- Normal clicks no longer wait for the next 125 ms polling boundary.
 
-Version 1.0.2 writes the required directory entry and includes regression tests matching Krita's importer discovery logic.
+## Less work per scan
 
-## Plugin functionality
+- Tracked Krita node wrappers are cached briefly instead of being resolved by UUID on every tick.
+- Rule membership is compiled into a dispatch index and rebuilt only when rule configuration changes.
+- Cascades evaluate only rules affected by the changed layers.
+- The controller reads back only layers it changed rather than resolving and rereading the entire tracked set again.
+- The docker is no longer rebuilt after every successful rule correction.
+- The plugin no longer calls `refreshProjection()` after visibility changes because Krita's own visibility setter already notifies the node graph and invalidates frames.
 
-- Inverse pairs: each member always has the opposite visibility of the other.
-- Exclusive sets: showing one member hides the other members.
-- Linked sets: showing or hiding one member applies the same state to the set.
-- Detection of changes made through Krita's normal layer visibility controls.
-- Rule data embedded inside each `.kra` file through a Krita document annotation.
-- UUID-based layer references, missing-layer reporting, and layer rebinding.
-- Rule ordering, enable/disable, global pause, polling interval, and manual enforcement.
-- Conflict/cycle protection to prevent endless visibility oscillation.
+## Compatibility and safety
 
-The rule schema remains version 1 and is compatible with files created by 1.0.0 and 1.0.1.
+- Inverse, exclusive, linked, cascade, conflict, persistence, rebind, and document-scoping behavior is unchanged.
+- Polling remains available and configurable from 25 to 1000 ms.
+- The `.kra` annotation schema remains version 1 and is compatible with all 1.0.x files.
+- The Krita importer packaging fix from 1.0.2 remains included.
 
 ## Install
 
-Use the release asset named `sprite_visibility_rules-1.0.2.zip`. Do not use GitHub's automatically generated “Source code” ZIPs.
+Use the release asset named `sprite_visibility_rules-1.1.0.zip`. Do not use GitHub's automatically generated “Source code” ZIPs.

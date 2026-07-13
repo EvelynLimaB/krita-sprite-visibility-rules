@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 
 from sprite_visibility_rules.controller import VisibilityController
 from sprite_visibility_rules.models import NodeRef, RuleKind, VisibilityRule
@@ -19,6 +20,7 @@ class FakeNode:
         self._name = name
         self._visible = visible
         self._children = children or []
+        self.set_calls = 0
 
     def uniqueId(self):
         return FakeUuid(self.node_id)
@@ -30,6 +32,7 @@ class FakeNode:
         return self._visible
 
     def setVisible(self, value):
+        self.set_calls += 1
         self._visible = bool(value)
 
     def childNodes(self):
@@ -38,6 +41,7 @@ class FakeNode:
 
 class FakeDocument:
     def __init__(self, nodes):
+        self.nodes = {node.node_id: node for node in nodes}
         self.root = FakeNode("root", "root", children=nodes)
         self.annotations = {}
         self.modified = False
@@ -66,6 +70,12 @@ class FakeDocument:
         self.refreshes += 1
 
 
+def resolve_fake(document, tracked_ids):
+    return {
+        node_id: document.nodes[node_id] for node_id in tracked_ids if node_id in document.nodes
+    }
+
+
 class ControllerTests(unittest.TestCase):
     def test_normal_eye_click_is_detected_and_inverse_applied(self):
         a = FakeNode("a", "Jacket on", True)
@@ -76,12 +86,37 @@ class ControllerTests(unittest.TestCase):
         controller.rules = [
             VisibilityRule("jacket", RuleKind.INVERSE, [NodeRef("a", "A"), NodeRef("b", "B")])
         ]
-        controller.snapshot()
-        a.setVisible(False)  # Simulate clicking Krita's normal eye icon.
-        report = controller.scan()
+        with patch(
+            "sprite_visibility_rules.controller.resolve_tracked_nodes",
+            side_effect=resolve_fake,
+        ) as resolver:
+            controller.snapshot(force_resolve=True)
+            a.setVisible(False)
+            report = controller.scan()
         self.assertTrue(b.visible())
         self.assertEqual(report.changed_count, 1)
-        self.assertEqual(doc.refreshes, 1)
+        self.assertEqual(doc.refreshes, 0)
+        self.assertEqual(resolver.call_count, 1)
+
+    def test_hot_scan_reuses_node_wrappers_and_avoids_second_resolve(self):
+        a = FakeNode("a", "A", True)
+        b = FakeNode("b", "B", False)
+        doc = FakeDocument([a, b])
+        controller = VisibilityController(bytes)
+        controller.set_document(doc)
+        controller.rules = [
+            VisibilityRule("pair", RuleKind.INVERSE, [NodeRef("a", "A"), NodeRef("b", "B")])
+        ]
+        with patch(
+            "sprite_visibility_rules.controller.resolve_tracked_nodes",
+            side_effect=resolve_fake,
+        ) as resolver:
+            controller.snapshot(force_resolve=True)
+            a.setVisible(False)
+            controller.scan()
+            b.setVisible(False)
+            controller.scan()
+        self.assertEqual(resolver.call_count, 1)
 
     def test_first_snapshot_never_changes_document(self):
         a = FakeNode("a", "A", True)
@@ -92,8 +127,12 @@ class ControllerTests(unittest.TestCase):
         controller.rules = [
             VisibilityRule("pair", RuleKind.INVERSE, [NodeRef("a", "A"), NodeRef("b", "B")])
         ]
-        controller.previous_states = {}
-        controller.scan()
+        with patch(
+            "sprite_visibility_rules.controller.resolve_tracked_nodes",
+            side_effect=resolve_fake,
+        ):
+            controller.previous_states = {}
+            controller.scan()
         self.assertTrue(a.visible())
         self.assertTrue(b.visible())
 
@@ -102,7 +141,6 @@ class ControllerTests(unittest.TestCase):
         second_node = FakeNode("b", "Second", True)
         first = FakeDocument([first_node])
         second = FakeDocument([second_node])
-        # Simulate a duplicated document whose root node retained the same UUID.
         self.assertEqual(first.root.uniqueId().toString(), second.root.uniqueId().toString())
 
         first_rule = VisibilityRule(
@@ -115,16 +153,20 @@ class ControllerTests(unittest.TestCase):
         second.annotations[ANNOTATION_TYPE] = serialize_rules([second_rule])
 
         controller = VisibilityController(bytes)
-        self.assertTrue(controller.set_document(first))
-        self.assertEqual(controller.rules[0].name, "First rule")
-        self.assertTrue(controller.set_document(second))
-        self.assertEqual(controller.rules[0].name, "Second rule")
+        with patch(
+            "sprite_visibility_rules.controller.resolve_tracked_nodes",
+            side_effect=resolve_fake,
+        ):
+            self.assertTrue(controller.set_document(first))
+            self.assertEqual(controller.rules[0].name, "First rule")
+            self.assertTrue(controller.set_document(second))
+            self.assertEqual(controller.rules[0].name, "Second rule")
 
     def test_same_document_wrapper_does_not_reload_unsaved_docker_edits(self):
         a = FakeNode("a", "A", True)
         doc = FakeDocument([a])
         controller = VisibilityController(bytes)
-        self.assertTrue(controller.set_document(doc))
+        controller.set_document(doc)
         controller.rules = [
             VisibilityRule(
                 "Unsaved docker edit",
@@ -144,7 +186,11 @@ class ControllerTests(unittest.TestCase):
         controller.rules = [
             VisibilityRule("pair", RuleKind.INVERSE, [NodeRef("a", "A"), NodeRef("b", "B")])
         ]
-        controller.save()
+        with patch(
+            "sprite_visibility_rules.controller.resolve_tracked_nodes",
+            side_effect=resolve_fake,
+        ):
+            controller.save()
         self.assertTrue(doc.annotations)
         self.assertTrue(doc.modified)
 

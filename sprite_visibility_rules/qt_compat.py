@@ -1,14 +1,11 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Small PyQt5/PyQt6 compatibility layer.
-
-Krita's current public Python examples and many production builds expose
-PyQt5. PyQt6 is supported as a fallback for builds that migrate the bindings.
-"""
+"""Small PyQt5/PyQt6 compatibility layer."""
 
 try:
-    from PyQt5.QtCore import QByteArray, Qt, QTimer, QUuid
+    from PyQt5.QtCore import QByteArray, QEvent, QObject, Qt, QTimer, QUuid
     from PyQt5.QtWidgets import (
         QAbstractItemView,
+        QApplication,
         QCheckBox,
         QComboBox,
         QDialog,
@@ -35,10 +32,15 @@ try:
     OK = QDialogButtonBox.Ok
     CANCEL = QDialogButtonBox.Cancel
     YES = QMessageBox.Yes
-except ImportError:  # Future/alternate Krita builds may expose PyQt6.
-    from PyQt6.QtCore import QByteArray, Qt, QTimer, QUuid
+    PRECISE_TIMER = Qt.PreciseTimer
+    COARSE_TIMER = Qt.CoarseTimer
+    MOUSE_BUTTON_RELEASE = QEvent.MouseButtonRelease
+    SHORTCUT_EVENT = QEvent.Shortcut
+except ImportError:
+    from PyQt6.QtCore import QByteArray, QEvent, QObject, Qt, QTimer, QUuid
     from PyQt6.QtWidgets import (
         QAbstractItemView,
+        QApplication,
         QCheckBox,
         QComboBox,
         QDialog,
@@ -65,6 +67,10 @@ except ImportError:  # Future/alternate Krita builds may expose PyQt6.
     OK = QDialogButtonBox.StandardButton.Ok
     CANCEL = QDialogButtonBox.StandardButton.Cancel
     YES = QMessageBox.StandardButton.Yes
+    PRECISE_TIMER = Qt.TimerType.PreciseTimer
+    COARSE_TIMER = Qt.TimerType.CoarseTimer
+    MOUSE_BUTTON_RELEASE = QEvent.Type.MouseButtonRelease
+    SHORTCUT_EVENT = QEvent.Type.Shortcut
 
 
 def exec_dialog(dialog):
@@ -78,19 +84,25 @@ def exec_dialog(dialog):
 __all__ = [
     "ACCEPTED",
     "CANCEL",
+    "COARSE_TIMER",
+    "MOUSE_BUTTON_RELEASE",
     "OK",
+    "PRECISE_TIMER",
     "QAbstractItemView",
+    "QApplication",
     "QByteArray",
     "QCheckBox",
     "QComboBox",
     "QDialog",
     "QDialogButtonBox",
+    "QEvent",
     "QFormLayout",
     "QHBoxLayout",
     "QLabel",
     "QLineEdit",
     "QListWidget",
     "QMessageBox",
+    "QObject",
     "QPushButton",
     "QSpinBox",
     "QTimer",
@@ -101,6 +113,7 @@ __all__ = [
     "QWidget",
     "QT_MAJOR",
     "SELECT_ROWS",
+    "SHORTCUT_EVENT",
     "SINGLE_SELECTION",
     "USER_ROLE",
     "YES",
