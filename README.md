@@ -2,7 +2,7 @@
 
 A Krita docker for game-art and sprite files where layer visibility needs to behave like state logic.
 
-## V1 features
+## Features
 
 - **Inverse pair:** hiding A shows B; showing A hides B, and vice versa.
 - **Exclusive set:** showing one expression/outfit layer hides every other member.
@@ -17,13 +17,17 @@ A Krita docker for game-art and sprite files where layer visibility needs to beh
 
 ## Install in Krita
 
-Download `sprite_visibility_rules-1.0.1.zip` from the release assets, then:
+Download the release asset named `sprite_visibility_rules-1.0.2.zip`, then:
 
 1. Open **Tools → Scripts → Import Python Plugin…**.
 2. Select the ZIP and restart Krita.
 3. Open **Settings → Configure Krita → Python Plugin Manager**.
 4. Enable **Sprite Visibility Rules** and restart Krita again.
 5. Open **Settings → Dockers → Sprite Visibility Rules**.
+
+Do **not** use GitHub's automatically generated **Source code (zip)** download. Use the specifically named plugin asset from the release.
+
+Version 1.0.1 had a packaging defect that caused Krita to report **“No plugins found in archive.”** Version 1.0.2 adds the explicit module-directory entry required by Krita's importer.
 
 ### Flatpak helper
 
@@ -68,25 +72,13 @@ Showing one member hides all other members. With **Allow every layer hidden** di
 
 The changed member becomes the driver and every other existing member receives the same visibility.
 
-## Limits of V1
+## Limits
 
-Krita's public Python API exposes `Node.visible()` and `Node.setVisible()` but no layer-visibility-changed signal. V1 therefore checks only linked layers on a short timer (125 ms by default). On Krita 6 it resolves tracked layers through `Document.nodeByUniqueID()` and falls back to tree traversal on older or unusual bindings. It does not inspect pixels or redraw the canvas itself.
+Krita's public Python API exposes `Node.visible()` and `Node.setVisible()` but no layer-visibility-changed signal. The plugin therefore checks only linked layers on a short timer (125 ms by default). On Krita 6 it resolves tracked layers through `Document.nodeByUniqueID()` and falls back to tree traversal on older or unusual bindings.
 
 An operation that changes several linked members in the same polling window is resolved deterministically: Krita's active layer wins when possible, then rule/member order. Overlapping rules are legal, but contradictory overlaps may be rejected as a cycle.
 
 ## Verification
-
-The repository contains pure-Python tests for:
-
-- both directions of inverse pairs;
-- linked and exclusive behavior;
-- strict fallback behavior;
-- missing layers;
-- cascaded rules;
-- cycle detection;
-- annotation serialization and malformed data;
-- normal-eye-click simulation through the controller;
-- Krita importer ZIP layout.
 
 Run the complete local verification suite:
 
@@ -94,23 +86,14 @@ Run the complete local verification suite:
 python3 scripts/verify_release.py
 ```
 
-The GitHub Actions workflow runs linting, package tests, Flatpak installer tests, and the offscreen Qt docker smoke test. See `TEST_REPORT.md` for the V1 verification record.
+The release builder writes the explicit `sprite_visibility_rules/` ZIP directory entry required by Krita's own importer, and the package tests mirror Krita's directory-and-`__init__.py` discovery algorithm.
 
-The GitHub Actions workflow runs the same checks on Python 3.10–3.13.
+The GitHub Actions workflows run linting, package tests, Flatpak installer tests, the offscreen Qt docker smoke test, deterministic ZIP checks, and automatic release publishing.
 
 ## Safety
 
-Test V1 on a copy of an important `.kra` file. The plugin stores only JSON rule configuration in a document annotation and changes only the `visible` property of participating layers. Removing a rule never deletes a layer.
+Test the plugin on a copy of an important `.kra` file. It stores only JSON rule configuration in a document annotation and changes only the `visible` property of participating layers. Removing a rule never deletes a layer.
 
 ## License
 
 GPL-3.0-or-later.
-
-## Publishing the prepared repository
-
-After installing and authenticating GitHub CLI, the included helper creates the repository under `EvelynLimaB`, pushes `main` and the version-derived release tag, and uploads the plugin ZIP and checksum as a GitHub release:
-
-```bash
-gh auth login
-./scripts/publish-github.sh
-```

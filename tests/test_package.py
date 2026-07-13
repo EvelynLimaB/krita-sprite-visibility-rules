@@ -36,8 +36,28 @@ class PackageTests(unittest.TestCase):
         with zipfile.ZipFile(archive) as zf:
             names = set(zf.namelist())
         self.assertIn("sprite_visibility_rules.desktop", names)
+        # Krita's built-in importer requires an explicit directory member. An
+        # implicit directory created only by file paths is not recognized.
+        self.assertIn("sprite_visibility_rules/", names)
         self.assertIn("sprite_visibility_rules/__init__.py", names)
         self.assertFalse(any(name.startswith("krita-sprite-visibility-rules/") for name in names))
+
+    def test_release_zip_matches_krita_importer_module_discovery(self):
+        archive = ROOT / "dist" / "sprite_visibility_rules-{}.zip".format(__version__)
+        with zipfile.ZipFile(archive) as zf:
+            names = zf.namelist()
+        module_name = "sprite_visibility_rules"
+        module_directory = next(
+            (
+                name
+                for name in names
+                if name.endswith("/{}/".format(module_name))
+                or name == "{}/".format(module_name)
+            ),
+            None,
+        )
+        self.assertIsNotNone(module_directory)
+        self.assertIn("{}__init__.py".format(module_directory), names)
 
 
 if __name__ == "__main__":

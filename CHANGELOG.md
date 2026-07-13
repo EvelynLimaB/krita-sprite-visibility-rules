@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.2 — 2026-07-13
+
+- Fixed the release ZIP so Krita's built-in importer recognizes the plugin.
+- Added the explicit `sprite_visibility_rules/` ZIP directory entry required by Krita's importer implementation.
+- Added regression tests that mirror Krita's module-discovery logic.
+- Plugin behavior and `.kra` annotation schema are unchanged from 1.0.1.
+
 ## 1.0.1 — 2026-07-13
 
 - Audited the plugin against Krita 6.0.2.1's public PyKrita API and importer.

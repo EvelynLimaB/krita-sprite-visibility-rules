@@ -18,6 +18,25 @@ ARCHIVE = DIST / "sprite_visibility_rules-{}.zip".format(__version__)
 # ZIP cannot represent dates before 1980. A fixed release timestamp makes the
 # archive byte-for-byte reproducible across checkouts and CI machines.
 ZIP_TIMESTAMP = (2026, 7, 13, 0, 0, 0)
+MODULE_DIRECTORY = "sprite_visibility_rules/"
+
+
+def write_directory(zf: zipfile.ZipFile, archive_name: str) -> None:
+    """Write an explicit directory entry required by Krita's plugin importer.
+
+    Krita's importer first searches ``ZipFile.namelist()`` for a directory
+    named after ``X-KDE-Library`` and only then checks for ``__init__.py``.
+    Merely storing files with that path prefix is not enough.
+    """
+
+    if not archive_name.endswith("/"):
+        archive_name += "/"
+    info = zipfile.ZipInfo(archive_name, date_time=ZIP_TIMESTAMP)
+    info.compress_type = zipfile.ZIP_STORED
+    info.create_system = 3
+    info.external_attr = (0o40755 & 0xFFFF) << 16
+    info.external_attr |= 0x10  # DOS directory flag for cross-platform readers.
+    zf.writestr(info, b"")
 
 
 def write_deterministic(zf: zipfile.ZipFile, source: Path, archive_name: str) -> None:
@@ -40,6 +59,9 @@ def main() -> int:
             ROOT / "sprite_visibility_rules.desktop",
             "sprite_visibility_rules.desktop",
         )
+        # Do not remove this entry. Krita's built-in importer requires it to
+        # recognize the module; implicit parent directories are insufficient.
+        write_directory(zf, MODULE_DIRECTORY)
         for path in sorted((ROOT / "sprite_visibility_rules").rglob("*")):
             if path.is_file() and "__pycache__" not in path.parts and path.suffix != ".pyc":
                 write_deterministic(zf, path, path.relative_to(ROOT).as_posix())
@@ -50,6 +72,7 @@ def main() -> int:
         names = set(zf.namelist())
     required = {
         "sprite_visibility_rules.desktop",
+        MODULE_DIRECTORY,
         "sprite_visibility_rules/__init__.py",
         "sprite_visibility_rules/docker.py",
         "sprite_visibility_rules/Manual.html",

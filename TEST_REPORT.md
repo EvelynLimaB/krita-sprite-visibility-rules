@@ -1,6 +1,6 @@
-# V1 verification report
+# Verification report
 
-Release: **1.0.1**
+Release: **1.0.2**  
 Verification date: **2026-07-13**
 
 ## Automated checks
@@ -8,7 +8,7 @@ Verification date: **2026-07-13**
 - `ruff format --check .`
 - `ruff check .`
 - deterministic importer ZIP build through `scripts/build_release.py`
-- 32 unit, controller, adapter, storage, and package tests
+- unit, controller, adapter, storage, package, and importer-layout tests
 - offscreen PyQt5 docker import/construction smoke test
 - recursive Python bytecode compilation
 - Bash syntax validation
@@ -31,30 +31,18 @@ Verification date: **2026-07-13**
 - annotation JSON round trip
 - malformed and unsupported annotation data
 - rule validation
-- importer-compatible ZIP root layout
 - plugin registration and docker construction
-- switching between distinct documents that happen to share a root-node UUID
-- preserving unsaved docker edits when Krita returns another wrapper for the same document
-- direct `Document.nodeByUniqueID()` resolution without a layer-tree walk
-- compatibility tree-walk fallback when Qt UUID conversion is unavailable
+- direct `Document.nodeByUniqueID()` resolution and compatibility fallback
 - per-window canvas document binding
 - in-memory rule-order rollback after a failed save
 - Linux Mint publishing through `python3`
+- explicit ZIP module-directory entry required by Krita's importer
+- module discovery matching Krita's directory plus `__init__.py` algorithm
 
-## Official Krita surfaces checked
+## Packaging regression fixed
 
-The implementation is limited to public libkis/PyKrita operations present in Krita 6.0.2.1:
-
-- `Krita.activeDocument()` and `Krita.activeWindow()`
-- `Window.activeView()`
-- `Canvas.view()` and `View.document()`
-- `View.selectedNodes()`
-- `Document.rootNode()`, `nodeByUniqueID()`, `activeNode()`, annotations, `setModified()`, and `refreshProjection()`
-- `Node.childNodes()`, `name()`, `uniqueId()`, `visible()`, and `setVisible()`
-- docker registration through `DockWidgetFactory`
-
-The importer package was checked against Krita's own Python plugin importer strategy: a `.desktop` descriptor, a matching module directory, and an `__init__.py` file.
+Version 1.0.1 contained the correct files but omitted the explicit `sprite_visibility_rules/` directory member. Krita's importer therefore returned “No plugins found in archive.” Version 1.0.2 writes this directory entry and tests it directly.
 
 ## Remaining real-world test
 
-This environment cannot launch the user's graphical Krita Flatpak. The release is structurally and behaviorally checked, but the final proof is an interactive test in the exact installed Krita build, desktop session, and plugin combination. The first-test procedure in `README.md` is designed to expose compatibility problems without risking a production file.
+The final proof is an interactive import and runtime test in the user's exact Krita Flatpak, desktop session, and plugin combination.
