@@ -40,7 +40,9 @@ class PackageTests(unittest.TestCase):
         # implicit directory created only by file paths is not recognized.
         self.assertIn("sprite_visibility_rules/", names)
         self.assertIn("sprite_visibility_rules/__init__.py", names)
-        self.assertFalse(any(name.startswith("krita-sprite-visibility-rules/") for name in names))
+        self.assertFalse(
+            any(name.startswith("krita-sprite-visibility-rules/") for name in names)
+        )
 
     def test_release_zip_matches_krita_importer_module_discovery(self):
         archive = ROOT / "dist" / "sprite_visibility_rules-{}.zip".format(__version__)
