@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Sprite Visibility Rules</title></head>
+<body>
+<h1>Sprite Visibility Rules</h1>
+<p>This docker links the visibility of layers used for game sprites, expression parts, outfits, effects, and alternate states.</p>
+<h2>Rule types</h2>
+<ul>
+<li><b>Exclusive set:</b> showing one member hides the other members. It can optionally require a fallback so at least one remains visible.</li>
+<li><b>Linked set:</b> showing or hiding one member applies the same state to all members.</li>
+<li><b>Inverse pair:</b> exactly two members always have opposite visibility.</li>
+</ul>
+<h2>Creating a rule</h2>
+<ol>
+<li>Select two or more layers in Krita's Layers docker.</li>
+<li>Open <b>Settings → Dockers → Sprite Visibility Rules</b>.</li>
+<li>Choose <b>Add from selected layers</b>, configure the rule, and press OK.</li>
+<li>Save the <code>.kra</code> document. Rules are embedded in that document.</li>
+</ol>
+<h2>Important behavior</h2>
+<p>The plugin checks participating layer visibility at a configurable interval. Normal eye-icon clicks, shortcuts, compositions, and other scripts are detected. If rules conflict and form a cycle, the plugin refuses to flicker the layers and reports a warning.</p>
+<p>Deleting and recreating a layer gives it a new internal ID. Select the replacement layers and use <b>Rebind</b>.</p>
+</body></html>

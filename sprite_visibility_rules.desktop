@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Service
+ServiceTypes=Krita/PythonPlugin
+X-KDE-Library=sprite_visibility_rules
+X-Python-2-Compatible=false
+X-Krita-Manual=Manual.html
+Name=Sprite Visibility Rules
+Comment=Link, invert, and mutually exclude layer visibility for sprites and game art.

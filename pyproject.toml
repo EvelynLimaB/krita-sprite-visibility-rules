@@ -1,0 +1,15 @@
+[project]
+name = "krita-sprite-visibility-rules"
+version = "1.0.0"
+description = "Krita docker for exclusive, linked, and inverse layer visibility rules"
+requires-python = ">=3.10"
+license = { text = "GPL-3.0-or-later" }
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+exclude = ["dist"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "B", "I"]
+ignore = ["E501"]
