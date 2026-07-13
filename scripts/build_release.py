@@ -63,11 +63,7 @@ def main() -> int:
         # recognize the module; implicit parent directories are insufficient.
         write_directory(zf, MODULE_DIRECTORY)
         for path in sorted((ROOT / "sprite_visibility_rules").rglob("*")):
-            if (
-                path.is_file()
-                and "__pycache__" not in path.parts
-                and path.suffix != ".pyc"
-            ):
+            if path.is_file() and "__pycache__" not in path.parts and path.suffix != ".pyc":
                 write_deterministic(zf, path, path.relative_to(ROOT).as_posix())
     with zipfile.ZipFile(ARCHIVE) as zf:
         bad = zf.testzip()
