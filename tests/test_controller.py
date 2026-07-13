@@ -99,7 +99,7 @@ class ControllerTests(unittest.TestCase):
         self.assertEqual(resolver.call_count, 1)
 
     def test_linked_batch_refreshes_projection_only_once(self):
-        a = FakeNode("a", "A", False)
+        a = FakeNode("a", "A", True)
         b = FakeNode("b", "B", True)
         c = FakeNode("c", "C", True)
         doc = FakeDocument([a, b, c])
@@ -117,10 +117,11 @@ class ControllerTests(unittest.TestCase):
             side_effect=resolve_fake,
         ):
             controller.snapshot(force_resolve=True)
-            a.setVisible(True)
-            controller.scan()
-        self.assertTrue(b.visible())
-        self.assertTrue(c.visible())
+            a.setVisible(False)
+            report = controller.scan()
+        self.assertFalse(b.visible())
+        self.assertFalse(c.visible())
+        self.assertEqual(report.changed_count, 2)
         self.assertEqual(doc.refreshes, 1)
 
     def test_hot_scan_reuses_node_wrappers_and_avoids_second_resolve(self):
