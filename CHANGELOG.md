@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.1.0 — 2026-07-13
+
+- Added immediate, coalesced scans after layer-list mouse input and shortcut events.
+- Retained configurable polling as a fallback for programmatic and unusual visibility changes.
+- Added short-lived node-wrapper caching to avoid repeated UUID resolution on every timer tick.
+- Added compiled rule membership indexes so only rules touched by changed layers are evaluated.
+- Removed redundant projection refreshes after `Node.setVisible()`.
+- Removed repeated full node scans and docker rebuilds from the normal visibility-change path.
+- Added a synthetic hot-path benchmark and regression tests for caching, dispatch, and scan coalescing.
+- Kept the document annotation schema at version 1; existing `.kra` rules remain compatible.
+
 ## 1.0.2 — 2026-07-13
 
 - Fixed the release ZIP so Krita's built-in importer recognizes the plugin.

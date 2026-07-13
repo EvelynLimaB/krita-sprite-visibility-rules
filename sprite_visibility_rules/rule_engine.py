@@ -4,9 +4,33 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, Iterable, List, Mapping, MutableMapping, Optional, Sequence, Set, Tuple
+from typing import (
+    Dict,
+    FrozenSet,
+    Iterable,
+    List,
+    Mapping,
+    MutableMapping,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+)
 
 from .models import RuleKind, VisibilityRule
+
+
+@dataclass(frozen=True)
+class CompiledRule:
+    rule: VisibilityRule
+    member_ids: Tuple[str, ...]
+    member_set: FrozenSet[str]
+
+
+@dataclass(frozen=True)
+class CompiledRuleSet:
+    rules: Tuple[CompiledRule, ...]
+    rules_by_member: Mapping[str, Tuple[int, ...]]
 
 
 @dataclass
@@ -29,13 +53,14 @@ def _ordered_unique(values: Iterable[str]) -> List[str]:
 
 
 def _choose_driver(
-    rule: VisibilityRule,
+    member_set: Set[str],
     trigger_order: Sequence[str],
     states: Mapping[str, bool],
     active_id: Optional[str],
 ) -> Optional[str]:
-    members = set(rule.member_ids)
-    candidates = [node_id for node_id in trigger_order if node_id in members and node_id in states]
+    candidates = [
+        node_id for node_id in trigger_order if node_id in member_set and node_id in states
+    ]
     if active_id in candidates:
         return active_id
     if candidates:
@@ -45,18 +70,18 @@ def _choose_driver(
 
 def _apply_exclusive(
     rule: VisibilityRule,
+    member_ids: Sequence[str],
     states: MutableMapping[str, bool],
     driver: str,
 ) -> List[str]:
     changed: List[str] = []
-    available = [node_id for node_id in rule.member_ids if node_id in states]
+    available = [node_id for node_id in member_ids if node_id in states]
     if len(available) < 2:
         return changed
 
     if states.get(driver, False):
-        winner = driver
         for node_id in available:
-            wanted = node_id == winner
+            wanted = node_id == driver
             if states[node_id] != wanted:
                 states[node_id] = wanted
                 changed.append(node_id)
@@ -64,9 +89,6 @@ def _apply_exclusive(
 
     visible = [node_id for node_id in available if states[node_id]]
     if len(visible) > 1:
-        # Preserve the earliest rule member, making invalid imported states
-        # deterministic even when the user changed a different layer off.
-        winner = visible[0]
         for node_id in visible[1:]:
             states[node_id] = False
             changed.append(node_id)
@@ -81,13 +103,13 @@ def _apply_exclusive(
 
 
 def _apply_linked(
-    rule: VisibilityRule,
+    member_ids: Sequence[str],
     states: MutableMapping[str, bool],
     driver: str,
 ) -> List[str]:
     changed: List[str] = []
     wanted = states[driver]
-    for node_id in rule.member_ids:
+    for node_id in member_ids:
         if node_id in states and states[node_id] != wanted:
             states[node_id] = wanted
             changed.append(node_id)
@@ -95,12 +117,12 @@ def _apply_linked(
 
 
 def _apply_inverse(
-    rule: VisibilityRule,
+    member_ids: Sequence[str],
     states: MutableMapping[str, bool],
     driver: str,
 ) -> List[str]:
     changed: List[str] = []
-    available = [node_id for node_id in rule.member_ids if node_id in states]
+    available = [node_id for node_id in member_ids if node_id in states]
     if len(available) != 2 or driver not in available:
         return changed
     other = available[1] if driver == available[0] else available[0]
@@ -111,36 +133,49 @@ def _apply_inverse(
     return changed
 
 
+def compile_rules(rules: Sequence[VisibilityRule]) -> CompiledRuleSet:
+    compiled_rules: List[CompiledRule] = []
+    rules_by_member: Dict[str, List[int]] = {}
+
+    for rule in rules:
+        if not rule.enabled:
+            continue
+        rule_index = len(compiled_rules)
+        member_ids = tuple(member.node_id for member in rule.members)
+        compiled_rules.append(
+            CompiledRule(rule=rule, member_ids=member_ids, member_set=frozenset(member_ids))
+        )
+        for node_id in member_ids:
+            rules_by_member.setdefault(node_id, []).append(rule_index)
+
+    return CompiledRuleSet(
+        rules=tuple(compiled_rules),
+        rules_by_member={
+            node_id: tuple(rule_indices) for node_id, rule_indices in rules_by_member.items()
+        },
+    )
+
+
 def enforce_rules(
     observed_states: Mapping[str, bool],
     changed_order: Sequence[str],
     rules: Sequence[VisibilityRule],
     active_id: Optional[str] = None,
     max_passes: int = 12,
+    compiled: Optional[CompiledRuleSet] = None,
 ) -> EnforcementResult:
-    """Apply triggered rules and return a stable desired state.
-
-    ``observed_states`` already contains the user's visibility click. The
-    engine returns only additional corrections for Krita to apply. Rules are
-    processed in list order, and changes may cascade into later passes.
-
-    If contradictory rules oscillate, no plugin-generated changes are returned;
-    the user's observed state is kept and the UI reports the cycle instead of
-    flickering layers indefinitely.
-    """
-
     base = dict(observed_states)
     working = dict(observed_states)
     triggers = [node_id for node_id in _ordered_unique(changed_order) if node_id in working]
     if not triggers:
         return EnforcementResult(states=working)
 
-    enabled_rules = [rule for rule in rules if rule.enabled]
+    compiled_rules = compiled if compiled is not None else compile_rules(rules)
     seen_signatures: Set[Tuple[Tuple[str, bool], ...]] = set()
     warnings: List[str] = []
 
     for pass_number in range(1, max_passes + 1):
-        signature = tuple(sorted(working.items()))
+        signature = tuple(working.items())
         if signature in seen_signatures:
             return EnforcementResult(
                 states=base,
@@ -153,18 +188,28 @@ def enforce_rules(
             )
         seen_signatures.add(signature)
 
+        candidate_indices = sorted(
+            {
+                rule_index
+                for trigger in triggers
+                for rule_index in compiled_rules.rules_by_member.get(trigger, ())
+            }
+        )
         next_triggers: List[str] = []
-        for rule in enabled_rules:
-            driver = _choose_driver(rule, triggers, working, active_id)
+        for rule_index in candidate_indices:
+            compiled_rule = compiled_rules.rules[rule_index]
+            rule = compiled_rule.rule
+            member_ids = compiled_rule.member_ids
+            driver = _choose_driver(compiled_rule.member_set, triggers, working, active_id)
             if driver is None:
                 continue
             if rule.kind == RuleKind.EXCLUSIVE:
-                changed = _apply_exclusive(rule, working, driver)
+                changed = _apply_exclusive(rule, member_ids, working, driver)
             elif rule.kind == RuleKind.LINKED:
-                changed = _apply_linked(rule, working, driver)
+                changed = _apply_linked(member_ids, working, driver)
             elif rule.kind == RuleKind.INVERSE:
-                changed = _apply_inverse(rule, working, driver)
-            else:  # Defensive for future schema versions.
+                changed = _apply_inverse(member_ids, working, driver)
+            else:
                 warnings.append("Unknown rule type in '{}'.".format(rule.name))
                 changed = []
             next_triggers.extend(changed)
@@ -199,17 +244,19 @@ def normalize_rules(
     observed_states: Mapping[str, bool],
     rules: Sequence[VisibilityRule],
     active_id: Optional[str] = None,
+    compiled: Optional[CompiledRuleSet] = None,
 ) -> EnforcementResult:
-    """Force every enabled rule to evaluate once.
-
-    Used after creating/editing rules and by the docker's *Enforce now* button.
-    """
-
     trigger_order: List[str] = []
     if active_id is not None:
         trigger_order.append(active_id)
     for rule in rules:
         if not rule.enabled:
             continue
-        trigger_order.extend(rule.member_ids)
-    return enforce_rules(observed_states, _ordered_unique(trigger_order), rules, active_id)
+        trigger_order.extend(member.node_id for member in rule.members)
+    return enforce_rules(
+        observed_states,
+        _ordered_unique(trigger_order),
+        rules,
+        active_id,
+        compiled=compiled,
+    )
