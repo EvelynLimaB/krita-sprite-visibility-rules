@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.1.1 — 2026-07-13
+
+- Added a 32 ms render-settle debounce before event-assisted visibility enforcement.
+- Restored one batched `Document.refreshProjection()` call after plugin-generated visibility changes.
+- Raised the minimum fallback polling interval from 25 ms to 50 ms.
+- Preserved the node cache, compiled rule dispatch, affected-rule-only cascades, and reduced docker rebuilding from 1.1.0.
+- Added regression tests for one projection refresh per batch and delayed/coalesced input scans.
+- Kept the document annotation schema at version 1; existing `.kra` rules remain compatible.
+
 ## 1.1.0 — 2026-07-13
 
 - Added immediate, coalesced scans after layer-list mouse input and shortcut events.

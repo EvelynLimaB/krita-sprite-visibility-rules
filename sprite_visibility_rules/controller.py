@@ -231,6 +231,24 @@ class VisibilityController:
                 )
         return final_states
 
+    def _refresh_projection(self, report: ScanReport) -> None:
+        """Request one canvas rebuild after the complete visibility batch.
+
+        ``Node.setVisible()`` invalidates Krita's node graph, but the actual
+        projection update is asynchronous. A fast sequence of related
+        visibility writes can otherwise leave the canvas displaying an
+        intermediate projection until another paint or navigation event. One
+        refresh per completed rule batch restores the stable V1.0 behavior
+        without bringing back repeated node resolution or docker rebuilds.
+        """
+
+        if self.document is None or not report.changed_count:
+            return
+        try:
+            self.document.refreshProjection()
+        except Exception as exc:
+            report.warnings.append("Could not refresh the Krita projection: {}".format(exc))
+
     def scan(self) -> ScanReport:
         report = ScanReport()
         if self.document is None or self.paused or not self.rules:
@@ -267,6 +285,7 @@ class VisibilityController:
             return report
 
         self.previous_states = self._apply_changes(nodes, states, result.changes, report)
+        self._refresh_projection(report)
         if report.changed_count:
             report.message = "Applied {} linked visibility change{}.".format(
                 report.changed_count, "" if report.changed_count == 1 else "s"
@@ -293,6 +312,7 @@ class VisibilityController:
             return report
 
         self.previous_states = self._apply_changes(nodes, states, result.changes, report)
+        self._refresh_projection(report)
         if report.changed_count:
             report.message = "Normalized {} layer visibility state{}.".format(
                 report.changed_count, "" if report.changed_count == 1 else "s"

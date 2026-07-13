@@ -8,7 +8,7 @@ A Krita docker for game-art and sprite files where layer visibility needs to beh
 - **Exclusive set:** showing one expression/outfit layer hides every other member.
 - **Linked set:** hiding or showing one layer applies the same state to every member.
 - Detects changes made through Krita's normal eye icons, shortcuts, compositions, or other plugins.
-- Wakes immediately after layer-list mouse input and shortcut events while retaining polling as a compatibility fallback.
+- Uses event-assisted scanning with a short render-settle delay while retaining polling as a compatibility fallback.
 - Embeds rules in the `.kra` document using Krita document annotations.
 - Uses Krita node UUIDs, so renaming or moving a linked layer does not break the rule.
 - Missing-layer warnings and **Rebind** support after a layer is deleted/recreated.
@@ -18,7 +18,7 @@ A Krita docker for game-art and sprite files where layer visibility needs to beh
 
 ## Install in Krita
 
-Download the release asset named `sprite_visibility_rules-1.1.0.zip`, then:
+Download the release asset named `sprite_visibility_rules-1.1.1.zip`, then:
 
 1. Open **Tools → Scripts → Import Python Plugin…**.
 2. Select the ZIP and restart Krita.
@@ -49,23 +49,24 @@ It installs into:
 3. Select both in the Layers docker.
 4. Press **Add from selected layers…**.
 5. Select **Inverse pair** and save the rule.
-6. Click either normal eye icon. The other layer should immediately switch to the opposite state.
+6. Click either normal eye icon. The other layer should switch to the opposite state after the short render-settle delay.
 7. Save the `.kra`, close it, reopen it, and verify the rule reloads.
 
-## Responsiveness
+## Responsiveness and render safety
 
-Version 1.1 adds an event-assisted fast path. A mouse release in a Krita item view, such as the Layers or Compositions docker, or a shortcut event schedules one coalesced scan at the next Qt event-loop opportunity. The regular timer remains active for visibility changes made programmatically by other plugins and for unusual UI paths.
+Version 1.1 uses an event-assisted fast path. Version 1.1.1 waits 32 ms after Layers/Compositions mouse input or a shortcut before enforcing dependent visibility. Rapid input is coalesced into one batch. This gives Krita time to finish its own layer-toggle transaction and projection scheduling before the plugin changes related layers.
 
-The fallback interval defaults to 125 ms. Since normal Layers-docker clicks wake immediately, increasing it to 250–500 ms can reduce idle API traffic without making ordinary eye-icon clicks feel slower. A 25–50 ms fallback is available for stress testing, but it performs more frequent visibility reads.
+After a plugin-generated visibility batch, the controller requests one `Document.refreshProjection()`. It does not refresh after every individual layer, resolve all tracked nodes again, or rebuild the docker tree.
 
-The hot path also:
+The fallback interval defaults to 125 ms and cannot be set below 50 ms. Since ordinary Layers-docker input uses the event-assisted path, increasing the fallback to 250–500 ms can reduce idle API traffic without noticeably slowing normal eye-icon clicks.
+
+The optimized hot path still:
 
 - caches resolved Krita node wrappers for a short period;
 - compiles rule membership and dispatch indexes only when rules change;
 - evaluates only rules touched by the changed layers;
 - avoids a second complete node-resolution pass after enforcement;
-- avoids rebuilding the docker after every successful visibility correction;
-- relies on Krita's own visibility invalidation instead of forcing an additional projection refresh.
+- avoids rebuilding the docker after every successful visibility correction.
 
 Run the synthetic rule-dispatch benchmark:
 
