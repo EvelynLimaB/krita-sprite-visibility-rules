@@ -1,0 +1,95 @@
+name: release
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  verify-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository and tags
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install verification dependencies
+        run: python -m pip install ruff "PyQt5>=5.15,<5.16"
+
+      - name: Run full release verification
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python3 scripts/verify_release.py
+
+      - name: Read and validate version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="$(python3 -c 'from sprite_visibility_rules.version import __version__; print(__version__)')"
+          TAG="v${VERSION}"
+          ASSET="dist/sprite_visibility_rules-${VERSION}.zip"
+
+          test -s "$ASSET"
+          test -s dist/SHA256SUMS
+          grep -F "sprite_visibility_rules-${VERSION}.zip" dist/SHA256SUMS >/dev/null
+
+          if git rev-parse --verify "refs/tags/${TAG}" >/dev/null 2>&1; then
+            TAG_SHA="$(git rev-list -n 1 "$TAG")"
+            if [[ "$TAG_SHA" != "$GITHUB_SHA" ]]; then
+              echo "Tag ${TAG} already points to ${TAG_SHA}, not ${GITHUB_SHA}. Bump the plugin version before publishing another release." >&2
+              exit 1
+            fi
+          fi
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "asset=$ASSET" >> "$GITHUB_OUTPUT"
+
+      - name: Create release or refresh its assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+          VERSION: ${{ steps.version.outputs.version }}
+          ASSET: ${{ steps.version.outputs.asset }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" \
+              "$ASSET" \
+              dist/SHA256SUMS \
+              --repo "$GITHUB_REPOSITORY" \
+              --clobber
+          else
+            gh release create "$TAG" \
+              "$ASSET" \
+              dist/SHA256SUMS \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
+              --title "Sprite Visibility Rules ${VERSION}" \
+              --notes-file RELEASE_NOTES.md
+          fi
+
+      - name: Publish workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sprite-visibility-rules-${{ steps.version.outputs.version }}
+          path: |
+            ${{ steps.version.outputs.asset }}
+            dist/SHA256SUMS
+          if-no-files-found: error
