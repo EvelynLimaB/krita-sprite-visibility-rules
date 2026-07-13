@@ -77,7 +77,7 @@ def resolve_fake(document, tracked_ids):
 
 
 class ControllerTests(unittest.TestCase):
-    def test_normal_eye_click_is_detected_and_inverse_applied(self):
+    def test_normal_eye_click_is_detected_inverse_applied_and_projection_refreshed(self):
         a = FakeNode("a", "Jacket on", True)
         b = FakeNode("b", "Jacket off", False)
         doc = FakeDocument([a, b])
@@ -95,8 +95,33 @@ class ControllerTests(unittest.TestCase):
             report = controller.scan()
         self.assertTrue(b.visible())
         self.assertEqual(report.changed_count, 1)
-        self.assertEqual(doc.refreshes, 0)
+        self.assertEqual(doc.refreshes, 1)
         self.assertEqual(resolver.call_count, 1)
+
+    def test_linked_batch_refreshes_projection_only_once(self):
+        a = FakeNode("a", "A", False)
+        b = FakeNode("b", "B", True)
+        c = FakeNode("c", "C", True)
+        doc = FakeDocument([a, b, c])
+        controller = VisibilityController(bytes)
+        controller.set_document(doc)
+        controller.rules = [
+            VisibilityRule(
+                "linked",
+                RuleKind.LINKED,
+                [NodeRef("a", "A"), NodeRef("b", "B"), NodeRef("c", "C")],
+            )
+        ]
+        with patch(
+            "sprite_visibility_rules.controller.resolve_tracked_nodes",
+            side_effect=resolve_fake,
+        ):
+            controller.snapshot(force_resolve=True)
+            a.setVisible(True)
+            controller.scan()
+        self.assertTrue(b.visible())
+        self.assertTrue(c.visible())
+        self.assertEqual(doc.refreshes, 1)
 
     def test_hot_scan_reuses_node_wrappers_and_avoids_second_resolve(self):
         a = FakeNode("a", "A", True)
@@ -117,6 +142,7 @@ class ControllerTests(unittest.TestCase):
             b.setVisible(False)
             controller.scan()
         self.assertEqual(resolver.call_count, 1)
+        self.assertEqual(doc.refreshes, 2)
 
     def test_first_snapshot_never_changes_document(self):
         a = FakeNode("a", "A", True)
@@ -135,6 +161,7 @@ class ControllerTests(unittest.TestCase):
             controller.scan()
         self.assertTrue(a.visible())
         self.assertTrue(b.visible())
+        self.assertEqual(doc.refreshes, 0)
 
     def test_distinct_documents_with_same_root_uuid_reload_rules(self):
         first_node = FakeNode("a", "First", True)
