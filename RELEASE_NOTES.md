@@ -1,30 +1,34 @@
-# Sprite Visibility Rules 1.1.0
+# Sprite Visibility Rules 1.1.1
 
-Responsiveness and hot-path optimization release.
+Render-stability patch for the 1.1 responsiveness work.
 
-## Faster interaction
+## Fixed
 
-- Layers-docker and Compositions-docker mouse input now schedules an immediate coalesced scan at the next Qt event-loop opportunity.
-- Shortcut events also wake the scanner immediately.
-- The configurable timer remains as a fallback for visibility changes made by other plugins or unusual UI paths.
-- Normal clicks no longer wait for the next 125 ms polling boundary.
+Some Krita canvases could display a stale or incomplete intermediate projection after rapid linked visibility changes. Version 1.1.0 applied dependent layer visibility at the next event-loop opportunity and removed the explicit projection refresh used by earlier releases. That combination was too aggressive for some documents and rendering paths.
 
-## Less work per scan
+Version 1.1.1:
 
-- Tracked Krita node wrappers are cached briefly instead of being resolved by UUID on every tick.
-- Rule membership is compiled into a dispatch index and rebuilt only when rule configuration changes.
-- Cascades evaluate only rules affected by the changed layers.
-- The controller reads back only layers it changed rather than resolving and rereading the entire tracked set again.
-- The docker is no longer rebuilt after every successful rule correction.
-- The plugin no longer calls `refreshProjection()` after visibility changes because Krita's own visibility setter already notifies the node graph and invalidates frames.
+- waits 32 ms after layer-list or shortcut input before enforcing dependent visibility;
+- coalesces rapid input into one rule batch;
+- performs one `Document.refreshProjection()` after the complete plugin-generated visibility batch;
+- raises the minimum fallback polling interval from 25 ms to 50 ms.
 
-## Compatibility and safety
+## Performance retained
+
+The release keeps the safe 1.1.0 optimizations:
+
+- cached UUID-resolved Krita node wrappers;
+- compiled layer-to-rule dispatch;
+- affected-rule-only cascade processing;
+- no repeated full tracked-node readback;
+- no docker-tree rebuild after ordinary successful corrections.
+
+## Compatibility
 
 - Inverse, exclusive, linked, cascade, conflict, persistence, rebind, and document-scoping behavior is unchanged.
-- Polling remains available and configurable from 25 to 1000 ms.
-- The `.kra` annotation schema remains version 1 and is compatible with all 1.0.x files.
+- The `.kra` annotation schema remains version 1 and is compatible with every previous release.
 - The Krita importer packaging fix from 1.0.2 remains included.
 
 ## Install
 
-Use the release asset named `sprite_visibility_rules-1.1.0.zip`. Do not use GitHub's automatically generated “Source code” ZIPs.
+Use the release asset named `sprite_visibility_rules-1.1.1.zip`. Do not use GitHub's automatically generated “Source code” ZIPs.
