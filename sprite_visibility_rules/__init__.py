@@ -14,7 +14,7 @@ try:
 except ImportError:  # pragma: no cover - expected in standalone unit tests
     pass
 else:
-    from .docker import SpriteVisibilityRulesDocker
+    from .safe_docker import SpriteVisibilityRulesDocker
 
     if not _REGISTERED:
         Krita.instance().addDockWidgetFactory(
