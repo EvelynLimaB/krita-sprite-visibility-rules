@@ -76,6 +76,18 @@ python3 scripts/benchmark_hot_path.py
 
 The benchmark isolates pure rule dispatch. It is not a canvas-rendering or GPU benchmark.
 
+## Interoperability with visibility utility plugins
+
+Sprite Visibility Rules intentionally does not reproduce adjacent-layer navigation, selected-layer toggles, or label-color toggle commands. It is designed to coexist with:
+
+- `Pine885/krita-plugin-layer-visibility-switch`
+- `LainFenrir/krita-sneaky-visibility`
+- `chimera28/quicktogglehidden`
+
+Untracked layers are ignored. A valid external visibility result is accepted without another write or projection refresh. An external result that violates a configured rule receives only the minimum dependent correction, batched into one refresh after the render-settle delay.
+
+See [`INTEROPERABILITY.md`](INTEROPERABILITY.md) for the compatibility contract and test matrix.
+
 ## Rule semantics
 
 ### Inverse pair
