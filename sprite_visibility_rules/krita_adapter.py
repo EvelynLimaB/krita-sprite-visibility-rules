@@ -33,12 +33,7 @@ def walk_nodes(root: Any) -> Iterable[Any]:
 
 
 def resolve_tracked_nodes(document: Any, tracked_ids: Set[str]) -> Dict[str, Any]:
-    """Resolve tracked nodes efficiently, with a compatibility fallback.
-
-    Krita 6 exposes ``Document.nodeByUniqueID(QUuid)``. Using it prevents an
-    automatic rule set with only a few members from walking a large layer tree
-    eight times per second. Older/fake API surfaces fall back to traversal.
-    """
+    """Resolve tracked nodes efficiently, with a compatibility fallback."""
 
     if not tracked_ids:
         return {}
@@ -51,8 +46,6 @@ def resolve_tracked_nodes(document: Any, tracked_ids: Set[str]) -> Dict[str, Any
             try:
                 node = lookup(QUuid(node_id))
             except Exception:
-                # A downstream build may expose the method with a binding that
-                # rejects PyQt's QUuid. The public tree API remains a safe path.
                 lookup_failed = True
                 break
             if node is not None:
@@ -80,6 +73,19 @@ def selected_nodes(application: Any) -> List[Any]:
     if view is None:
         return []
     return list(view.selectedNodes())
+
+
+def selected_nodes_for_canvas(canvas: Any, application: Any) -> List[Any]:
+    """Read selection from the docker's canvas before using the active window."""
+
+    if canvas is not None:
+        try:
+            view = canvas.view()
+            if view is not None:
+                return list(view.selectedNodes())
+        except Exception:
+            pass
+    return selected_nodes(application)
 
 
 def active_node_id(document: Any) -> Optional[str]:
