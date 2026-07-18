@@ -43,9 +43,7 @@ class FakeDocument:
 
 def resolve_fake(document, tracked_ids):
     return {
-        node_id: document.nodes[node_id]
-        for node_id in tracked_ids
-        if node_id in document.nodes
+        node_id: document.nodes[node_id] for node_id in tracked_ids if node_id in document.nodes
     }
 
 
