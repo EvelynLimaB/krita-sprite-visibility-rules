@@ -108,7 +108,9 @@ class SpriteVisibilityRulesDocker(DockWidget):
         layout.addLayout(settings_row)
 
         self.status_label = QLabel(
-            "Ready — plugin v{}; input scans wait for Krita to settle.".format(__version__),
+            "Ready — plugin v{}; input scans wait for Krita to settle.".format(
+                __version__
+            ),
             root,
         )
         self.status_label.setWordWrap(True)
@@ -118,7 +120,7 @@ class SpriteVisibilityRulesDocker(DockWidget):
 
         self.scheduler = ScanScheduler(
             self,
-            self._scan_once,
+            lambda check_document: self._scan_once(check_document),
             interval_ms=self.interval_spin.value(),
             settle_ms=INPUT_SETTLE_MS,
         )
@@ -180,7 +182,8 @@ class SpriteVisibilityRulesDocker(DockWidget):
         else:
             self._set_status(
                 "Loaded {} rule{} from this document.".format(
-                    len(self.controller.rules), "" if len(self.controller.rules) == 1 else "s"
+                    len(self.controller.rules),
+                    "" if len(self.controller.rules) == 1 else "s",
                 )
             )
 
@@ -263,7 +266,9 @@ class SpriteVisibilityRulesDocker(DockWidget):
         finally:
             self._scan_running = False
 
-    def _set_status(self, text: str, warning: bool = False, error: bool = False) -> None:
+    def _set_status(
+        self, text: str, warning: bool = False, error: bool = False
+    ) -> None:
         prefix = "Error: " if error else "Warning: " if warning else ""
         self.status_label.setText(prefix + text)
 
@@ -275,11 +280,14 @@ class SpriteVisibilityRulesDocker(DockWidget):
         if report.missing_ids:
             parts.append(
                 "{} linked layer{} missing; use Rebind after recreating them.".format(
-                    len(report.missing_ids), " is" if len(report.missing_ids) == 1 else "s are"
+                    len(report.missing_ids),
+                    " is" if len(report.missing_ids) == 1 else "s are",
                 )
             )
         if parts:
-            self._set_status(" ".join(parts), warning=bool(report.warnings or report.missing_ids))
+            self._set_status(
+                " ".join(parts), warning=bool(report.warnings or report.missing_ids)
+            )
 
     def _selected_rule_index(self) -> Optional[int]:
         items = self.rule_tree.selectedItems()
@@ -415,7 +423,9 @@ class SpriteVisibilityRulesDocker(DockWidget):
 
     def _set_paused(self, paused: bool) -> None:
         self.controller.paused = bool(paused)
-        self._set_status("Automatic rules paused." if paused else "Automatic rules resumed.")
+        self._set_status(
+            "Automatic rules paused." if paused else "Automatic rules resumed."
+        )
         self._update_monitoring_state(refresh_snapshot=not paused)
 
     def _set_interval(self, value: int) -> None:
@@ -425,11 +435,15 @@ class SpriteVisibilityRulesDocker(DockWidget):
     def refresh_tree(self, missing: Optional[Set[str]] = None) -> None:
         selected_index = self._selected_rule_index()
         self.rule_tree.clear()
-        missing_ids = set(self.controller.last_missing_ids if missing is None else missing)
+        missing_ids = set(
+            self.controller.last_missing_ids if missing is None else missing
+        )
         conflicts = self.controller.conflicts()
 
         for index, rule in enumerate(self.controller.rules):
-            missing_count = sum(member.node_id in missing_ids for member in rule.members)
+            missing_count = sum(
+                member.node_id in missing_ids for member in rule.members
+            )
             conflict_count = sum(member.node_id in conflicts for member in rule.members)
             statuses = []
             if not rule.enabled:
@@ -452,5 +466,8 @@ class SpriteVisibilityRulesDocker(DockWidget):
             self.rule_tree.addTopLevelItem(item)
         self.rule_tree.resizeColumnToContents(0)
         self.rule_tree.resizeColumnToContents(1)
-        if selected_index is not None and selected_index < self.rule_tree.topLevelItemCount():
+        if (
+            selected_index is not None
+            and selected_index < self.rule_tree.topLevelItemCount()
+        ):
             self.rule_tree.setCurrentItem(self.rule_tree.topLevelItem(selected_index))
