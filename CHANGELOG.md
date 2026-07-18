@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.2.0 — 2026-07-17
+
+- Starts the 32 ms render-settle delay only after the current Krita or external-plugin action returns to the Qt event loop.
+- Replaced one application event filter per docker with one shared, non-consuming input broker.
+- Stops fallback polling when there is no document, no enabled rule, or automatic enforcement is paused.
+- Scopes rule creation and rebinding to the docker's own canvas selection in multi-window sessions.
+- Ignores mouse input originating inside the Sprite Visibility Rules docker itself.
+- Replaced per-scan rule-signature reconstruction with explicit revision-aware controller mutations.
+- Consolidated the optimized and render-safe docker implementations into one runtime class.
+- Added scheduler, lifecycle, canvas-selection, multi-window broker, and controller-revision regression coverage.
+- Preserved the non-overlap compatibility contract with Layer Visibility Switch, Sneaky Visibility, and QuickToggleHidden.
+- Kept the document annotation schema at version 1; existing `.kra` rules remain compatible.
+
 ## 1.1.1 — 2026-07-13
 
 - Added a 32 ms render-settle debounce before event-assisted visibility enforcement.
