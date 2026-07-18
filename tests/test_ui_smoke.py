@@ -186,14 +186,10 @@ class UiSmokeTests(unittest.TestCase):
                 docker.move_rule(1)
             finally:
                 docker._save_and_refresh = original_save
-            self.assertEqual(
-                [rule.name for rule in docker.controller.rules], original_order
-            )
+            self.assertEqual([rule.name for rule in docker.controller.rules], original_order)
 
             own_event = QEvent(MOUSE_BUTTON_RELEASE)
-            self.assertFalse(
-                docker._input_should_wake(docker.rule_tree.viewport(), own_event)
-            )
+            self.assertFalse(docker._input_should_wake(docker.rule_tree.viewport(), own_event))
 
             original_scan_once = docker._scan_once
             docker._scan_once = Mock()
