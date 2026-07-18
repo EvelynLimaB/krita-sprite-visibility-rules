@@ -46,6 +46,41 @@ class TraversalDocument:
         return self.root
 
 
+class FakeView:
+    def __init__(self, nodes):
+        self.nodes = nodes
+
+    def selectedNodes(self):
+        return list(self.nodes)
+
+
+class FakeCanvas:
+    def __init__(self, nodes, broken=False):
+        self.nodes = nodes
+        self.broken = broken
+
+    def view(self):
+        if self.broken:
+            raise RuntimeError("closed canvas")
+        return FakeView(self.nodes)
+
+
+class FakeWindow:
+    def __init__(self, nodes):
+        self.nodes = nodes
+
+    def activeView(self):
+        return FakeView(self.nodes)
+
+
+class FakeApplication:
+    def __init__(self, nodes):
+        self.nodes = nodes
+
+    def activeWindow(self):
+        return FakeWindow(self.nodes)
+
+
 class KritaAdapterTests(unittest.TestCase):
     def test_public_uuid_lookup_avoids_layer_tree_walk(self):
         first = FakeNode("a")
@@ -62,6 +97,21 @@ class KritaAdapterTests(unittest.TestCase):
         with patch.object(krita_adapter, "QUuid", None):
             found = krita_adapter.resolve_tracked_nodes(document, {"a"})
         self.assertEqual(found, {"a": first})
+
+    def test_canvas_selection_wins_over_another_active_window(self):
+        canvas_node = FakeNode("canvas")
+        other_node = FakeNode("other")
+        selected = krita_adapter.selected_nodes_for_canvas(
+            FakeCanvas([canvas_node]), FakeApplication([other_node])
+        )
+        self.assertEqual(selected, [canvas_node])
+
+    def test_active_window_is_a_safe_fallback_for_closed_canvas(self):
+        other_node = FakeNode("other")
+        selected = krita_adapter.selected_nodes_for_canvas(
+            FakeCanvas([], broken=True), FakeApplication([other_node])
+        )
+        self.assertEqual(selected, [other_node])
 
 
 if __name__ == "__main__":

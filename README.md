@@ -8,7 +8,7 @@ A Krita docker for game-art and sprite files where layer visibility needs to beh
 - **Exclusive set:** showing one expression/outfit layer hides every other member.
 - **Linked set:** hiding or showing one layer applies the same state to every member.
 - Detects changes made through Krita's normal eye icons, shortcuts, compositions, or other plugins.
-- Uses event-assisted scanning with a short render-settle delay while retaining polling as a compatibility fallback.
+- Uses event-assisted scanning with a render-settle delay and polling as a compatibility fallback.
 - Embeds rules in the `.kra` document using Krita document annotations.
 - Uses Krita node UUIDs, so renaming or moving a linked layer does not break the rule.
 - Missing-layer warnings and **Rebind** support after a layer is deleted/recreated.
@@ -18,7 +18,7 @@ A Krita docker for game-art and sprite files where layer visibility needs to beh
 
 ## Install in Krita
 
-Download the release asset named `sprite_visibility_rules-1.1.1.zip`, then:
+Download the release asset named `sprite_visibility_rules-1.2.0.zip`, then:
 
 1. Open **Tools → Scripts → Import Python Plugin…**.
 2. Select the ZIP and restart Krita.
@@ -49,24 +49,31 @@ It installs into:
 3. Select both in the Layers docker.
 4. Press **Add from selected layers…**.
 5. Select **Inverse pair** and save the rule.
-6. Click either normal eye icon. The other layer should switch to the opposite state after the short render-settle delay.
+6. Click either normal eye icon. The other layer should switch after the short render-settle delay.
 7. Save the `.kra`, close it, reopen it, and verify the rule reloads.
 
 ## Responsiveness and render safety
 
-Version 1.1 uses an event-assisted fast path. Version 1.1.1 waits 32 ms after Layers/Compositions mouse input or a shortcut before enforcing dependent visibility. Rapid input is coalesced into one batch. This gives Krita time to finish its own layer-toggle transaction and projection scheduling before the plugin changes related layers.
+Version 1.2 starts its 32 ms render-settle interval only after the current Qt input or shortcut action returns. Long synchronous actions from Krita or another plugin therefore finish before Sprite Visibility Rules begins its settle countdown.
 
-After a plugin-generated visibility batch, the controller requests one `Document.refreshProjection()`. It does not refresh after every individual layer, resolve all tracked nodes again, or rebuild the docker tree.
+Rapid input is coalesced into one dependent visibility batch. A plugin-generated batch requests one `Document.refreshProjection()` only when the rule engine actually changes a layer.
 
-The fallback interval defaults to 125 ms and cannot be set below 50 ms. Since ordinary Layers-docker input uses the event-assisted path, increasing the fallback to 250–500 ms can reduce idle API traffic without noticeably slowing normal eye-icon clicks.
+The fallback interval defaults to 125 ms and cannot be set below 50 ms. Polling automatically stops when:
 
-The optimized hot path still:
+- no document is attached to the docker;
+- no rule is enabled;
+- automatic rules are paused.
+
+Normal layer-list input still uses the separate event-assisted path. A 250–500 ms fallback can therefore reduce idle API traffic without making ordinary eye-icon use feel slow.
+
+The optimized hot path:
 
 - caches resolved Krita node wrappers for a short period;
-- compiles rule membership and dispatch indexes only when rules change;
-- evaluates only rules touched by the changed layers;
+- rebuilds compiled rule membership only after an explicit rule revision;
+- evaluates only rules touched by changed layers;
 - avoids a second complete node-resolution pass after enforcement;
-- avoids rebuilding the docker after every successful visibility correction.
+- avoids rebuilding the docker after every successful visibility correction;
+- ignores input originating from the plugin's own rule tree.
 
 Run the synthetic rule-dispatch benchmark:
 
@@ -76,6 +83,12 @@ python3 scripts/benchmark_hot_path.py
 
 The benchmark isolates pure rule dispatch. It is not a canvas-rendering or GPU benchmark.
 
+## Multi-window behavior
+
+Each docker remains bound to its own canvas document. Rule creation and rebinding read the selected nodes from that same canvas view instead of whichever Krita window happens to be globally active.
+
+All dockers share one application-wide event broker. It observes but never consumes Qt input events and routes wake requests only through each docker's compatibility checks.
+
 ## Interoperability with visibility utility plugins
 
 Sprite Visibility Rules intentionally does not reproduce adjacent-layer navigation, selected-layer toggles, or label-color toggle commands. It is designed to coexist with:
@@ -84,7 +97,7 @@ Sprite Visibility Rules intentionally does not reproduce adjacent-layer navigati
 - `LainFenrir/krita-sneaky-visibility`
 - `chimera28/quicktogglehidden`
 
-Untracked layers are ignored. A valid external visibility result is accepted without another write or projection refresh. An external result that violates a configured rule receives only the minimum dependent correction, batched into one refresh after the render-settle delay.
+Untracked layers are ignored. A valid external visibility result is accepted without another write or projection refresh. An external result that violates a configured rule receives only the minimum dependent correction, batched into one refresh after the external action and render-settle delay.
 
 See [`INTEROPERABILITY.md`](INTEROPERABILITY.md) for the compatibility contract and test matrix.
 

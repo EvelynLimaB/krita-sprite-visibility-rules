@@ -28,24 +28,88 @@ class VisibilityController:
     def __init__(self, qbytearray_class: Any):
         self.qbytearray_class = qbytearray_class
         self.document: Any = None
-        self.rules: List[VisibilityRule] = []
+        self._rules: List[VisibilityRule] = []
         self.previous_states: Dict[str, bool] = {}
         self.paused = False
         self.load_warnings: List[str] = []
         self.last_error = ""
         self.last_missing_ids: Set[str] = set()
 
-        self._rule_signature: Optional[Tuple[Any, ...]] = None
+        self._rules_revision = 0
+        self._indexed_revision = -1
         self._ordered_ids: Tuple[str, ...] = ()
         self._tracked_id_set: FrozenSet[str] = frozenset()
         self._node_cache: Dict[str, Any] = {}
         self._compiled_rules: CompiledRuleSet = compile_rules(())
         self._last_node_resolve = 0.0
 
+    @property
+    def rules(self) -> List[VisibilityRule]:
+        return self._rules
+
+    @rules.setter
+    def rules(self, value: List[VisibilityRule]) -> None:
+        self.replace_rules(value)
+
+    @property
+    def rules_revision(self) -> int:
+        return self._rules_revision
+
+    def _mark_rules_changed(self) -> None:
+        self._rules_revision += 1
+
+    def replace_rules(self, rules: List[VisibilityRule]) -> None:
+        self._rules = list(rules)
+        self._mark_rules_changed()
+
+    def add_rule(self, rule: VisibilityRule) -> int:
+        self._rules.append(rule)
+        self._mark_rules_changed()
+        return len(self._rules) - 1
+
+    def insert_rule(self, index: int, rule: VisibilityRule) -> None:
+        self._rules.insert(index, rule)
+        self._mark_rules_changed()
+
+    def replace_rule(self, index: int, rule: VisibilityRule) -> VisibilityRule:
+        previous = self._rules[index]
+        self._rules[index] = rule
+        self._mark_rules_changed()
+        return previous
+
+    def remove_rule(self, index: int) -> VisibilityRule:
+        removed = self._rules.pop(index)
+        self._mark_rules_changed()
+        return removed
+
+    def set_rule_enabled(self, index: int, enabled: bool) -> bool:
+        previous = self._rules[index].enabled
+        self._rules[index].enabled = bool(enabled)
+        self._mark_rules_changed()
+        return previous
+
+    def move_rule(self, index: int, target: int) -> bool:
+        if index == target:
+            return True
+        if min(index, target) < 0 or max(index, target) >= len(self._rules):
+            return False
+        rule = self._rules.pop(index)
+        self._rules.insert(target, rule)
+        self._mark_rules_changed()
+        return True
+
+    def touch_rules(self) -> None:
+        """Invalidate compiled state after an intentional in-place rule edit."""
+
+        self._mark_rules_changed()
+
+    def has_enabled_rules(self) -> bool:
+        return any(rule.enabled for rule in self._rules)
+
     def _clear_runtime_cache(self) -> None:
         self.previous_states = {}
         self.last_missing_ids = set()
-        self._rule_signature = None
+        self._indexed_revision = -1
         self._ordered_ids = ()
         self._tracked_id_set = frozenset()
         self._node_cache = {}
@@ -64,7 +128,8 @@ class VisibilityController:
                 pass
 
         self.document = document
-        self.rules = []
+        self._rules = []
+        self._mark_rules_changed()
         self.load_warnings = []
         self.last_error = ""
         self._clear_runtime_cache()
@@ -72,34 +137,20 @@ class VisibilityController:
             return True
         try:
             loaded = load_from_document(document)
-            self.rules = loaded.rules
+            self.replace_rules(loaded.rules)
             self.load_warnings = loaded.warnings
         except StorageError as exc:
             self.last_error = str(exc)
         self.snapshot(force_resolve=True)
         return True
 
-    def _current_rule_signature(self) -> Tuple[Any, ...]:
-        return tuple(
-            (
-                rule.rule_id,
-                rule.enabled,
-                rule.kind.value,
-                rule.allow_none,
-                rule.fallback_id,
-                tuple(member.node_id for member in rule.members),
-            )
-            for rule in self.rules
-        )
-
     def _ensure_rule_index(self) -> None:
-        signature = self._current_rule_signature()
-        if signature == self._rule_signature:
+        if self._indexed_revision == self._rules_revision:
             return
 
         ordered: List[str] = []
         seen: Set[str] = set()
-        for rule in self.rules:
+        for rule in self._rules:
             if not rule.enabled:
                 continue
             for member in rule.members:
@@ -109,10 +160,10 @@ class VisibilityController:
 
         tracked = frozenset(seen)
         tracked_changed = tracked != self._tracked_id_set
-        self._rule_signature = signature
         self._ordered_ids = tuple(ordered)
         self._tracked_id_set = tracked
-        self._compiled_rules = compile_rules(self.rules)
+        self._compiled_rules = compile_rules(self._rules)
+        self._indexed_revision = self._rules_revision
         if tracked_changed:
             self._node_cache = {
                 node_id: node for node_id, node in self._node_cache.items() if node_id in tracked
@@ -190,8 +241,11 @@ class VisibilityController:
     def save(self) -> None:
         if self.document is None:
             raise StorageError("Open a Krita document before editing rules.")
+        # This catches supported in-place edits made before save while normal
+        # structural operations use the explicit revision-aware methods above.
+        self.touch_rules()
         self._ensure_rule_index()
-        save_to_document(self.document, self.rules, self.qbytearray_class)
+        save_to_document(self.document, self._rules, self.qbytearray_class)
         self.snapshot(force_resolve=True)
 
     def _active_driver(self, changed_order: List[str]) -> Optional[str]:
@@ -227,21 +281,11 @@ class VisibilityController:
                 report.changed_count += 1
             if actual != wanted:
                 report.warnings.append(
-                    "Krita did not keep the requested visibility for layer '{}'.".format(node_id)
+                    "Krita did not keep the requested visibility for layer '{}'".format(node_id)
                 )
         return final_states
 
     def _refresh_projection(self, report: ScanReport) -> None:
-        """Request one canvas rebuild after the complete visibility batch.
-
-        ``Node.setVisible()`` invalidates Krita's node graph, but the actual
-        projection update is asynchronous. A fast sequence of related
-        visibility writes can otherwise leave the canvas displaying an
-        intermediate projection until another paint or navigation event. One
-        refresh per completed rule batch restores the stable V1.0 behavior
-        without bringing back repeated node resolution or docker rebuilds.
-        """
-
         if self.document is None or not report.changed_count:
             return
         try:
@@ -251,7 +295,7 @@ class VisibilityController:
 
     def scan(self) -> ScanReport:
         report = ScanReport()
-        if self.document is None or self.paused or not self.rules:
+        if self.document is None or self.paused or not self.has_enabled_rules():
             return report
         nodes, states = self._nodes_and_states()
         report.missing_ids = set(self.last_missing_ids)
@@ -274,7 +318,7 @@ class VisibilityController:
         result = enforce_rules(
             states,
             changed_order,
-            self.rules,
+            self._rules,
             active_id=self._active_driver(changed_order),
             compiled=self._compiled_rules,
         )
@@ -301,7 +345,7 @@ class VisibilityController:
         report.missing_ids = set(self.last_missing_ids)
         result = normalize_rules(
             states,
-            self.rules,
+            self._rules,
             self._active_driver(self.ordered_tracked_ids()),
             compiled=self._compiled_rules,
         )
@@ -320,4 +364,4 @@ class VisibilityController:
         return report
 
     def conflicts(self):
-        return find_membership_conflicts(self.rules)
+        return find_membership_conflicts(self._rules)

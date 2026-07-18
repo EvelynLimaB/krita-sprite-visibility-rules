@@ -1,34 +1,40 @@
-# Sprite Visibility Rules 1.1.1
+# Sprite Visibility Rules 1.2.0
 
-Render-stability patch for the 1.1 responsiveness work.
+Interoperability, idle-efficiency, and multi-window correctness upgrade.
 
-## Fixed
+## External-plugin compatibility
 
-Some Krita canvases could display a stale or incomplete intermediate projection after rapid linked visibility changes. Version 1.1.0 applied dependent layer visibility at the next event-loop opportunity and removed the explicit projection refresh used by earlier releases. That combination was too aggressive for some documents and rendering paths.
+The event-assisted scan now uses two stages:
 
-Version 1.1.1:
+1. return control to the Qt event loop so the current Krita or external-plugin action can finish;
+2. wait the existing 32 ms render-settle interval before evaluating dependent rules.
 
-- waits 32 ms after layer-list or shortcut input before enforcing dependent visibility;
-- coalesces rapid input into one rule batch;
-- performs one `Document.refreshProjection()` after the complete plugin-generated visibility batch;
-- raises the minimum fallback polling interval from 25 ms to 50 ms.
+This prevents the settle countdown from expiring inside a long synchronous action such as a multi-layer visibility toggle. Valid results from other plugins remain untouched. Invalid governed states still receive only the minimum dependent correction and one projection refresh.
 
-## Performance retained
+Sprite Visibility Rules continues to avoid duplicating adjacent-layer navigation, selected-layer toggle, or label-color toggle commands.
 
-The release keeps the safe 1.1.0 optimizations:
+## Lower idle work
 
-- cached UUID-resolved Krita node wrappers;
-- compiled layer-to-rule dispatch;
-- affected-rule-only cascade processing;
-- no repeated full tracked-node readback;
-- no docker-tree rebuild after ordinary successful corrections.
+- One application-wide event broker now serves all Sprite Visibility Rules dockers.
+- Fallback polling stops when no document is open, no rule is enabled, or automatic rules are paused.
+- Mouse events inside the plugin's own rule tree no longer schedule scans.
+- Rule indexes are rebuilt from explicit revisions instead of reconstructing a complete signature every scan.
+
+## Multi-window safety
+
+Rule creation and rebinding now read selected nodes from the docker's own canvas view before falling back to Krita's active window. A docker in one window therefore cannot accidentally bind layers selected in another window.
+
+## Internal cleanup
+
+The temporary `safe_docker.py` subclass has been removed. Scheduling, rendering safety, and the optimized docker behavior now live in one implementation supported by dedicated scheduler and event-broker components.
 
 ## Compatibility
 
-- Inverse, exclusive, linked, cascade, conflict, persistence, rebind, and document-scoping behavior is unchanged.
-- The `.kra` annotation schema remains version 1 and is compatible with every previous release.
+- The `.kra` annotation schema remains version 1.
+- Existing inverse, exclusive, linked, cascade, conflict, persistence, and rebind behavior is unchanged.
+- Existing files created with every 1.0.x and 1.1.x release remain compatible.
 - The Krita importer packaging fix from 1.0.2 remains included.
 
 ## Install
 
-Use the release asset named `sprite_visibility_rules-1.1.1.zip`. Do not use GitHub's automatically generated “Source code” ZIPs.
+Use the release asset named `sprite_visibility_rules-1.2.0.zip`. Do not use GitHub's automatically generated “Source code” ZIPs.
