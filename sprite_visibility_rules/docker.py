@@ -3,19 +3,19 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import List, Optional, Set
 
 from krita import DockWidget, Krita
 
 from .controller import ScanReport, VisibilityController
 from .dialogs import RuleDialog
-from .krita_adapter import node_ref, selected_nodes
+from .event_broker import get_input_event_broker
+from .krita_adapter import node_ref, selected_nodes_for_canvas
 from .models import NodeRef
 from .qt_compat import (
     ACCEPTED,
-    COARSE_TIMER,
     MOUSE_BUTTON_RELEASE,
-    PRECISE_TIMER,
     SELECT_ROWS,
     SHORTCUT_EVENT,
     SINGLE_SELECTION,
@@ -28,39 +28,17 @@ from .qt_compat import (
     QHBoxLayout,
     QLabel,
     QMessageBox,
-    QObject,
     QPushButton,
     QSpinBox,
-    QTimer,
     QTreeWidget,
     QTreeWidgetItem,
     QVBoxLayout,
     QWidget,
     exec_dialog,
 )
+from .scheduler import INPUT_SETTLE_MS, MINIMUM_FALLBACK_POLL_MS, ScanScheduler
 from .storage import StorageError
 from .version import __version__
-
-
-class _InputWakeFilter(QObject):
-    """Wake the scanner after visibility-related UI input.
-
-    The filter relies only on public Qt event and widget base classes. It does
-    not inspect Krita's private Layers-docker object names or delegates.
-    """
-
-    def __init__(self, docker):
-        super().__init__(docker)
-        self._docker = docker
-
-    def eventFilter(self, watched, event):
-        try:
-            if self._docker._input_should_wake(watched, event):
-                self._docker.request_scan()
-        except Exception:
-            # An event filter must never interfere with Krita's own event path.
-            pass
-        return False
 
 
 class SpriteVisibilityRulesDocker(DockWidget):
@@ -70,7 +48,6 @@ class SpriteVisibilityRulesDocker(DockWidget):
         self.app = Krita.instance()
         self.controller = VisibilityController(QByteArray)
         self._canvas = None
-        self._scan_pending = False
         self._scan_running = False
         self._last_missing_ids: Set[str] = set()
 
@@ -117,24 +94,37 @@ class SpriteVisibilityRulesDocker(DockWidget):
         settings_row = QHBoxLayout()
         self.pause_checkbox = QCheckBox("Pause automatic rules", root)
         self.interval_spin = QSpinBox(root)
-        self.interval_spin.setRange(25, 1000)
+        self.interval_spin.setRange(MINIMUM_FALLBACK_POLL_MS, 1000)
         self.interval_spin.setSingleStep(25)
         stored_interval = int(
             self.app.readSetting("sprite_visibility_rules", "poll_interval_ms", "125")
         )
-        self.interval_spin.setValue(max(25, min(1000, stored_interval)))
+        self.interval_spin.setValue(
+            max(MINIMUM_FALLBACK_POLL_MS, min(1000, stored_interval))
+        )
         settings_row.addWidget(self.pause_checkbox)
         settings_row.addWidget(QLabel("Fallback poll ms:", root))
         settings_row.addWidget(self.interval_spin)
         layout.addLayout(settings_row)
 
         self.status_label = QLabel(
-            "Ready — plugin v{}; layer-list input wakes immediately.".format(__version__), root
+            "Ready — plugin v{}; input scans wait for Krita to settle.".format(__version__),
+            root,
         )
         self.status_label.setWordWrap(True)
         layout.addWidget(self.status_label)
 
         self.setWidget(root)
+
+        self.scheduler = ScanScheduler(
+            self,
+            self._scan_once,
+            interval_ms=self.interval_spin.value(),
+            settle_ms=INPUT_SETTLE_MS,
+        )
+        # Kept as stable aliases for diagnostics and existing smoke tests.
+        self.timer = self.scheduler.fallback_timer
+        self._input_settle_timer = self.scheduler.settle_timer
 
         self.add_button.clicked.connect(self.add_rule)
         self.edit_button.clicked.connect(self.edit_rule)
@@ -147,15 +137,11 @@ class SpriteVisibilityRulesDocker(DockWidget):
         self.pause_checkbox.toggled.connect(self._set_paused)
         self.interval_spin.valueChanged.connect(self._set_interval)
 
-        self.timer = QTimer(self)
-        self.timer.timeout.connect(self._tick)
-        self._set_interval(self.interval_spin.value())
-        self.timer.start()
-
-        self._input_filter = _InputWakeFilter(self)
+        self._input_broker = None
         qt_application = QApplication.instance()
         if qt_application is not None:
-            qt_application.installEventFilter(self._input_filter)
+            self._input_broker = get_input_event_broker(qt_application)
+            self._input_broker.register(self)
 
         self._switch_document()
 
@@ -176,6 +162,7 @@ class SpriteVisibilityRulesDocker(DockWidget):
     def _switch_document(self) -> None:
         document = self._current_document()
         changed = self.controller.set_document(document)
+        self._update_monitoring_state()
         if not changed:
             return
 
@@ -197,6 +184,16 @@ class SpriteVisibilityRulesDocker(DockWidget):
                 )
             )
 
+    def _update_monitoring_state(self, refresh_snapshot: bool = False) -> None:
+        should_monitor = (
+            self.controller.document is not None
+            and not self.controller.paused
+            and self.controller.has_enabled_rules()
+        )
+        if should_monitor and refresh_snapshot:
+            self.controller.snapshot(force_resolve=True)
+        self.scheduler.set_active(should_monitor)
+
     def _is_same_window(self, watched) -> bool:
         try:
             watched_window = watched.window()
@@ -204,6 +201,20 @@ class SpriteVisibilityRulesDocker(DockWidget):
         except Exception:
             return True
         return watched_window == docker_window
+
+    def _belongs_to_this_docker(self, watched) -> bool:
+        current = watched
+        root_widget = self.widget()
+        for _depth in range(20):
+            if current is self or current is root_widget:
+                return True
+            parent_widget = getattr(current, "parentWidget", None)
+            if parent_widget is None:
+                return False
+            current = parent_widget()
+            if current is None:
+                return False
+        return False
 
     @staticmethod
     def _is_item_view_or_child(watched) -> bool:
@@ -220,7 +231,7 @@ class SpriteVisibilityRulesDocker(DockWidget):
         return False
 
     def _input_should_wake(self, watched, event) -> bool:
-        if self.controller.paused or not self.controller.rules:
+        if not self.scheduler.active or self._belongs_to_this_docker(watched):
             return False
         event_type = event.type()
         if event_type == SHORTCUT_EVENT:
@@ -230,23 +241,11 @@ class SpriteVisibilityRulesDocker(DockWidget):
         return self._is_same_window(watched) and self._is_item_view_or_child(watched)
 
     def request_scan(self) -> None:
-        if self._scan_pending:
-            return
-        self._scan_pending = True
-        QTimer.singleShot(0, self._run_pending_scan)
-
-    def _run_pending_scan(self) -> None:
-        self._scan_pending = False
-        self._scan_once(check_document=False)
-
-    def _tick(self) -> None:
-        if self._scan_pending:
-            return
-        self._scan_once(check_document=True)
+        self.scheduler.request_after_input()
 
     def _scan_once(self, check_document: bool) -> None:
         if self._scan_running:
-            self.request_scan()
+            self.scheduler.request_after_input()
             return
         self._scan_running = True
         try:
@@ -294,7 +293,7 @@ class SpriteVisibilityRulesDocker(DockWidget):
         return index if 0 <= index < len(self.controller.rules) else None
 
     def _selected_refs(self) -> List[NodeRef]:
-        nodes = selected_nodes(self.app)
+        nodes = selected_nodes_for_canvas(self._canvas, self.app)
         unique = []
         seen = set()
         for node in nodes:
@@ -315,6 +314,7 @@ class SpriteVisibilityRulesDocker(DockWidget):
             self._show_report(report)
         self._last_missing_ids = set(self.controller.last_missing_ids)
         self.refresh_tree(missing=self._last_missing_ids)
+        self._update_monitoring_state()
         return True
 
     def add_rule(self) -> None:
@@ -329,9 +329,9 @@ class SpriteVisibilityRulesDocker(DockWidget):
         dialog = RuleDialog(refs, parent=self)
         if exec_dialog(dialog) != ACCEPTED:
             return
-        self.controller.rules.append(dialog.build_rule())
+        index = self.controller.add_rule(dialog.build_rule())
         if not self._save_and_refresh(enforce=True):
-            self.controller.rules.pop()
+            self.controller.remove_rule(index)
 
     def edit_rule(self) -> None:
         index = self._selected_rule_index()
@@ -341,10 +341,9 @@ class SpriteVisibilityRulesDocker(DockWidget):
         dialog = RuleDialog(list(existing.members), existing=existing, parent=self)
         if exec_dialog(dialog) != ACCEPTED:
             return
-        old = existing
-        self.controller.rules[index] = dialog.build_rule()
+        previous = self.controller.replace_rule(index, dialog.build_rule())
         if not self._save_and_refresh(enforce=True):
-            self.controller.rules[index] = old
+            self.controller.replace_rule(index, previous)
 
     def rebind_rule(self) -> None:
         index = self._selected_rule_index()
@@ -359,14 +358,13 @@ class SpriteVisibilityRulesDocker(DockWidget):
                 "Select at least two layers; inverse pairs require exactly two.",
             )
             return
-        old_members = rule.members
-        old_fallback = rule.fallback_id
-        rule.members = refs
+        fallback_id = rule.fallback_id
         if rule.kind.value == "exclusive" and not rule.allow_none:
-            rule.fallback_id = refs[0].node_id
+            fallback_id = refs[0].node_id
+        rebound = replace(rule, members=refs, fallback_id=fallback_id)
+        previous = self.controller.replace_rule(index, rebound)
         if not self._save_and_refresh(enforce=True):
-            rule.members = old_members
-            rule.fallback_id = old_fallback
+            self.controller.replace_rule(index, previous)
 
     def remove_rule(self) -> None:
         index = self._selected_rule_index()
@@ -382,37 +380,31 @@ class SpriteVisibilityRulesDocker(DockWidget):
         )
         if answer != YES:
             return
-        removed = self.controller.rules.pop(index)
+        removed = self.controller.remove_rule(index)
         if not self._save_and_refresh():
-            self.controller.rules.insert(index, removed)
+            self.controller.insert_rule(index, removed)
 
     def toggle_rule(self) -> None:
         index = self._selected_rule_index()
         if index is None:
             return
-        rule = self.controller.rules[index]
-        rule.enabled = not rule.enabled
-        if not self._save_and_refresh(enforce=rule.enabled):
-            rule.enabled = not rule.enabled
+        previous = self.controller.set_rule_enabled(
+            index, not self.controller.rules[index].enabled
+        )
+        if not self._save_and_refresh(enforce=self.controller.rules[index].enabled):
+            self.controller.set_rule_enabled(index, previous)
 
     def move_rule(self, offset: int) -> None:
         index = self._selected_rule_index()
         if index is None:
             return
         target = index + offset
-        if target < 0 or target >= len(self.controller.rules):
+        if not self.controller.move_rule(index, target):
             return
-        self.controller.rules[index], self.controller.rules[target] = (
-            self.controller.rules[target],
-            self.controller.rules[index],
-        )
         if self._save_and_refresh():
             self.rule_tree.setCurrentItem(self.rule_tree.topLevelItem(target))
         else:
-            self.controller.rules[index], self.controller.rules[target] = (
-                self.controller.rules[target],
-                self.controller.rules[index],
-            )
+            self.controller.move_rule(target, index)
             self.refresh_tree(missing=self._last_missing_ids)
 
     def enforce_now(self) -> None:
@@ -424,13 +416,10 @@ class SpriteVisibilityRulesDocker(DockWidget):
     def _set_paused(self, paused: bool) -> None:
         self.controller.paused = bool(paused)
         self._set_status("Automatic rules paused." if paused else "Automatic rules resumed.")
-        if not paused:
-            self.controller.snapshot(force_resolve=True)
+        self._update_monitoring_state(refresh_snapshot=not paused)
 
     def _set_interval(self, value: int) -> None:
-        if hasattr(self, "timer"):
-            self.timer.setTimerType(PRECISE_TIMER if value <= 125 else COARSE_TIMER)
-            self.timer.setInterval(value)
+        self.scheduler.set_interval(value)
         self.app.writeSetting("sprite_visibility_rules", "poll_interval_ms", str(value))
 
     def refresh_tree(self, missing: Optional[Set[str]] = None) -> None:
