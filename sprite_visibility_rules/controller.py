@@ -166,7 +166,9 @@ class VisibilityController:
         self._indexed_revision = self._rules_revision
         if tracked_changed:
             self._node_cache = {
-                node_id: node for node_id, node in self._node_cache.items() if node_id in tracked
+                node_id: node
+                for node_id, node in self._node_cache.items()
+                if node_id in tracked
             }
             self.previous_states = {
                 node_id: state
@@ -202,9 +204,13 @@ class VisibilityController:
             or now - self._last_node_resolve >= NODE_CACHE_REFRESH_SECONDS
         )
         if should_resolve:
-            self._node_cache = resolve_tracked_nodes(self.document, set(self._tracked_id_set))
+            self._node_cache = resolve_tracked_nodes(
+                self.document, set(self._tracked_id_set)
+            )
             self._last_node_resolve = now
-            self.last_missing_ids = set(self._tracked_id_set).difference(self._node_cache.keys())
+            self.last_missing_ids = set(self._tracked_id_set).difference(
+                self._node_cache.keys()
+            )
         return {
             node_id: self._node_cache[node_id]
             for node_id in self._ordered_ids
@@ -281,7 +287,9 @@ class VisibilityController:
                 report.changed_count += 1
             if actual != wanted:
                 report.warnings.append(
-                    "Krita did not keep the requested visibility for layer '{}'.".format(node_id)
+                    "Krita did not keep the requested visibility for layer '{}'".format(
+                        node_id
+                    )
                 )
         return final_states
 
@@ -291,7 +299,9 @@ class VisibilityController:
         try:
             self.document.refreshProjection()
         except Exception as exc:
-            report.warnings.append("Could not refresh the Krita projection: {}".format(exc))
+            report.warnings.append(
+                "Could not refresh the Krita projection: {}".format(exc)
+            )
 
     def scan(self) -> ScanReport:
         report = ScanReport()
@@ -328,7 +338,9 @@ class VisibilityController:
             self.previous_states = states
             return report
 
-        self.previous_states = self._apply_changes(nodes, states, result.changes, report)
+        self.previous_states = self._apply_changes(
+            nodes, states, result.changes, report
+        )
         self._refresh_projection(report)
         if report.changed_count:
             report.message = "Applied {} linked visibility change{}.".format(
@@ -355,7 +367,9 @@ class VisibilityController:
             self.previous_states = states
             return report
 
-        self.previous_states = self._apply_changes(nodes, states, result.changes, report)
+        self.previous_states = self._apply_changes(
+            nodes, states, result.changes, report
+        )
         self._refresh_projection(report)
         if report.changed_count:
             report.message = "Normalized {} layer visibility state{}.".format(
